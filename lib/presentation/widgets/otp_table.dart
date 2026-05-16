@@ -8,9 +8,11 @@ import 'service_row.dart';
 class OtpTable extends StatelessWidget {
   final Map<String, List<OtpService>> groupedServices;
   final Map<String, String> groupNames;
-  final Function(String, int) onRowTap;
+  final void Function(OtpService service) onRowTap;
   final Future<void> Function(OtpService service) onEditService;
+  final int? sortColumnIndex;
   final bool sortAscending;
+  final void Function(int columnIndex, bool ascending) onSort;
 
   const OtpTable({
     super.key,
@@ -18,7 +20,9 @@ class OtpTable extends StatelessWidget {
     required this.groupNames,
     required this.onRowTap,
     required this.onEditService,
+    required this.sortColumnIndex,
     required this.sortAscending,
+    required this.onSort,
   });
 
   @override
@@ -26,7 +30,7 @@ class OtpTable extends StatelessWidget {
     return DataTable(
       showCheckboxColumn: false,
       sortAscending: sortAscending,
-      sortColumnIndex: 1,
+      sortColumnIndex: sortColumnIndex,
       columns: _buildColumns(),
       rows: _buildRows(context),
       dataRowMinHeight: 28.0,
@@ -37,7 +41,7 @@ class OtpTable extends StatelessWidget {
   }
 
   List<DataColumn> _buildColumns() {
-    return const <DataColumn>[
+    return <DataColumn>[
       DataColumn(
         label: SizedBox(
           width: 40,
@@ -54,6 +58,7 @@ class OtpTable extends StatelessWidget {
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
         ),
+        onSort: onSort,
       ),
       DataColumn(
         label: Expanded(
@@ -62,12 +67,14 @@ class OtpTable extends StatelessWidget {
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
         ),
+        onSort: onSort,
       ),
       DataColumn(
         label: Text(
           'Issuer',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
+        onSort: onSort,
       ),
       DataColumn(
         label: Text(
@@ -101,6 +108,8 @@ class OtpTable extends StatelessWidget {
 
     for (final entry in groupedServices.entries) {
       String groupName = groupNames[entry.key] ?? 'Unknown Group';
+      final sortedServices =
+          sortServicesForTable(entry.value, sortColumnIndex, sortAscending);
 
       // Add group header row
       rows.add(
@@ -113,17 +122,14 @@ class OtpTable extends StatelessWidget {
       );
 
       // Add service rows
-      for (int i = 0; i < entry.value.length; i++) {
-        OtpService service = entry.value[i];
+      for (final service in sortedServices) {
         final displayState = otpState.getOtpDisplayState(service.id);
-        // Use service.id directly - stable across re-sorts
-        // If duplicate IDs exist in data, that's a data quality issue
         rows.add(
           ServiceRow(
             key: ValueKey(service.id),
             service: service,
             displayState: displayState,
-            onTap: () => onRowTap(entry.key, i),
+            onTap: () => onRowTap(service),
             onEdit: () => onEditService(service),
             iconWidth: iconWidth,
             nameWidth: nameWidth,
@@ -138,4 +144,40 @@ class OtpTable extends StatelessWidget {
 
     return rows;
   }
+}
+
+List<OtpService> sortServicesForTable(
+  List<OtpService> services,
+  int? sortColumnIndex,
+  bool sortAscending,
+) {
+  if (sortColumnIndex == null || !const {1, 2, 3}.contains(sortColumnIndex)) {
+    return List<OtpService>.from(services);
+  }
+
+  final sortedServices = List<OtpService>.from(services)
+    ..sort((a, b) {
+      final left = switch (sortColumnIndex) {
+        1 => a.name,
+        2 => a.otp.account,
+        3 => a.otp.issuer,
+        _ => '',
+      };
+      final right = switch (sortColumnIndex) {
+        1 => b.name,
+        2 => b.otp.account,
+        3 => b.otp.issuer,
+        _ => '',
+      };
+
+      final comparison = left.toLowerCase().compareTo(right.toLowerCase());
+      if (comparison != 0) {
+        return sortAscending ? comparison : -comparison;
+      }
+
+      final fallback = a.order.position.compareTo(b.order.position);
+      return sortAscending ? fallback : -fallback;
+    });
+
+  return sortedServices;
 }

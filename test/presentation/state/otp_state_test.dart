@@ -14,8 +14,11 @@ import 'package:libreotp/presentation/state/otp_state.dart';
 class MockStorageRepository extends StorageRepository {
   List<Group> _groups = [];
   List<OtpService> _services = [];
+  List<Group> _importGroups = [];
+  List<OtpService> _importServices = [];
   bool shouldThrowException = false;
   late File _testFile;
+  AppData? savedData;
 
   MockStorageRepository() {
     final tempDir = Directory.systemTemp;
@@ -35,6 +38,11 @@ class MockStorageRepository extends StorageRepository {
   Future<void> saveData(AppData data) async {}
 
   @override
+  Future<AppData> importBackupFile(String filePath, {String? password}) async {
+    return AppData(groups: _importGroups, services: _importServices);
+  }
+
+  @override
   Future<File> getLocalFile() async => _testFile;
 
   @override
@@ -43,6 +51,11 @@ class MockStorageRepository extends StorageRepository {
   void setTestData(List<Group> groups, List<OtpService> services) {
     _groups = groups;
     _services = services;
+  }
+
+  void setImportData(List<Group> groups, List<OtpService> services) {
+    _importGroups = groups;
+    _importServices = services;
   }
 }
 
@@ -132,6 +145,60 @@ void main() {
         expect(didUpdate, isTrue);
         expect(otpState.services.first.name, equals('New Name'));
         expect(otpState.services.first.otp.account, equals('new@example.com'));
+      });
+
+      test('should merge imported backup data by secret and append new order',
+          () async {
+        final existingGroup = Group(id: 'work', name: 'Work');
+        final importedGroup = Group(id: 'personal', name: 'Personal');
+
+        final existingService = OtpService(
+          id: 'existing-1',
+          name: 'GitHub',
+          secret: 'SECRET1',
+          otp: const OtpConfig(account: 'work@example.com', issuer: 'GitHub'),
+          order: const OrderInfo(position: 0),
+          groupId: 'work',
+        );
+        final duplicateImportedService = OtpService(
+          id: 'import-duplicate',
+          name: 'GitHub Duplicate',
+          secret: ' secret1 ',
+          otp: const OtpConfig(account: 'dup@example.com', issuer: 'GitHub'),
+          order: const OrderInfo(position: 0),
+          groupId: 'work',
+        );
+        final newImportedService = OtpService(
+          id: 'import-new',
+          name: 'Google',
+          secret: 'SECRET2',
+          otp: const OtpConfig(account: 'me@gmail.com', issuer: 'Google'),
+          order: const OrderInfo(position: 0),
+          groupId: 'personal',
+        );
+
+        mockRepository.setTestData([existingGroup], [existingService]);
+        mockRepository.setImportData(
+          [existingGroup, importedGroup],
+          [duplicateImportedService, newImportedService],
+        );
+        await otpState.initializeData();
+
+        final importResult = await otpState.importBackupFile('dummy.json');
+
+        expect(importResult, isNotNull);
+        expect(importResult!.addedServices.map((service) => service.id),
+            equals(['import-new']));
+        expect(importResult.ignoredServices.map((service) => service.id),
+            equals(['import-duplicate']));
+        expect(otpState.services.map((service) => service.id),
+            containsAll(['existing-1', 'import-new']));
+        expect(otpState.groups.map((group) => group.id),
+            containsAll(['work', 'personal']));
+
+        final groupedServices = otpState.groupedServices;
+        expect(groupedServices['work']!.first.order.position, equals(0));
+        expect(groupedServices['personal']!.first.order.position, equals(0));
       });
     });
 

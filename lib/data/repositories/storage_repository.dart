@@ -130,7 +130,7 @@ class StorageRepository {
     }
   }
 
-  /// Imports a 2FAS backup file from the given path and copies it to app storage
+  /// Imports a 2FAS backup file from the given path and parses its data.
   Future<AppData> importBackupFile(String filePath, {String? password}) async {
     try {
       final sourceFile = File(filePath);
@@ -147,11 +147,8 @@ class StorageRepository {
         throw ArgumentError('Selected file is not a valid 2FAS backup');
       }
 
-      // Test loading the data first before copying
-      AppData testData = await _parseBackupData(jsonData, contents, password);
-
-      // If parsing succeeded, copy the file to app storage
-      await _copyToAppStorage(sourceFile);
+      // Parse the backup data for merging into local storage
+      AppData testData = await _parseBackupData(jsonData, password);
 
       debugPrint('Successfully imported backup from: $filePath');
       return testData;
@@ -181,7 +178,7 @@ class StorageRepository {
   }
 
   Future<AppData> _parseBackupData(
-      Map<String, dynamic> jsonData, String contents, String? password) async {
+      Map<String, dynamic> jsonData, String? password) async {
     // Check if backup is encrypted
     if (TwoFasDecryptionService.isEncrypted(jsonData)) {
       if (password == null) {
@@ -215,11 +212,5 @@ class StorageRepository {
 
       return AppData(services: services, groups: groups);
     }
-  }
-
-  Future<void> _copyToAppStorage(File sourceFile) async {
-    final destinationFile = await getLocalFile();
-    await sourceFile.copy(destinationFile.path);
-    debugPrint('Copied backup to app storage: ${destinationFile.path}');
   }
 }
