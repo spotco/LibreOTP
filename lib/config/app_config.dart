@@ -25,7 +25,8 @@ class AppConfig {
       return _cachedAppTitle!;
     }
     final packageInfo = await PackageInfo.fromPlatform();
-    final version = _formatVersion(packageInfo.version, packageInfo.buildNumber);
+    final version =
+        _formatVersion(packageInfo.version, packageInfo.buildNumber);
     _cachedAppTitle = 'LibreOTP $version';
     return _cachedAppTitle!;
   }
@@ -34,12 +35,12 @@ class AppConfig {
   static String getAppTitleSync() {
     return _cachedAppTitle ?? appName;
   }
-  
+
   static Future<String> getAppVersion() async {
     final packageInfo = await PackageInfo.fromPlatform();
     return _formatVersion(packageInfo.version, packageInfo.buildNumber);
   }
-  
+
   static String _formatVersion(String version, String buildNumber) {
     // For local development (flutter run), show a dev indicator
     if (version.startsWith('0.0.0-snapshot')) {
@@ -123,6 +124,27 @@ class AppConfig {
     await prefs.setDouble(_windowYKey, bounds.top);
     await prefs.setDouble(_windowWidthKey, bounds.width);
     await prefs.setDouble(_windowHeightKey, bounds.height);
+  }
+
+  static Future<void> persistWindowState({
+    required bool maximized,
+    Rect? bounds,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final writes = <Future<bool>>[
+      prefs.setBool(_windowMaximizedKey, maximized),
+    ];
+
+    if (bounds != null) {
+      writes.addAll([
+        prefs.setDouble(_windowXKey, bounds.left),
+        prefs.setDouble(_windowYKey, bounds.top),
+        prefs.setDouble(_windowWidthKey, bounds.width),
+        prefs.setDouble(_windowHeightKey, bounds.height),
+      ]);
+    }
+
+    await Future.wait(writes);
   }
 
   static Future<bool> getWindowMaximized() async {
