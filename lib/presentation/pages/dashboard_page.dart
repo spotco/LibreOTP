@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../data/models/otp_service.dart';
 import '../../config/app_config.dart';
 import '../state/otp_state.dart';
+import '../widgets/edit_service_dialog.dart';
 import '../widgets/search_bar.dart';
 import '../widgets/otp_table.dart';
 import '../widgets/password_dialog.dart';
@@ -65,6 +67,26 @@ class _DashboardPageState extends State<DashboardPage> {
   void _updateSearchQuery() {
     final otpState = Provider.of<OtpState>(context, listen: false);
     otpState.setSearchQuery(_searchController.text);
+  }
+
+  Future<void> _showEditDialog(BuildContext context, OtpService service) async {
+    final result = await showDialog<EditServiceResult>(
+      context: context,
+      builder: (_) => EditServiceDialog(
+        initialName: service.name,
+        initialAccount: service.otp.account,
+      ),
+    );
+
+    if (!context.mounted || result == null) {
+      return;
+    }
+
+    context.read<OtpState>().updateServiceDetails(
+          serviceId: service.id,
+          name: result.name,
+          account: result.account,
+        );
   }
 
   void _showDataDirectory(BuildContext context) {
@@ -204,7 +226,10 @@ class _DashboardPageState extends State<DashboardPage> {
                       '${otpState.services.length} services',
                       style: TextStyle(
                         fontSize: 14,
-                        color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.8),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onPrimary
+                            .withValues(alpha: 0.8),
                         fontWeight: FontWeight.normal,
                       ),
                     );
@@ -214,17 +239,20 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
             actions: [
               IconButton(
-                icon: Icon(Icons.upload_file, color: Theme.of(context).colorScheme.onPrimary),
+                icon: Icon(Icons.upload_file,
+                    color: Theme.of(context).colorScheme.onPrimary),
                 tooltip: 'Import 2FAS Backup',
                 onPressed: () => _showImportDialog(context),
               ),
               IconButton(
-                icon: Icon(Icons.folder_open, color: Theme.of(context).colorScheme.onPrimary),
+                icon: Icon(Icons.folder_open,
+                    color: Theme.of(context).colorScheme.onPrimary),
                 tooltip: 'Show Data Directory',
                 onPressed: () => _showDataDirectory(context),
               ),
               PopupMenuButton<ThemeMode>(
-                icon: Icon(Icons.brightness_medium, color: Theme.of(context).colorScheme.onPrimary),
+                icon: Icon(Icons.brightness_medium,
+                    color: Theme.of(context).colorScheme.onPrimary),
                 tooltip: 'Theme',
                 onSelected: widget.onThemeChanged,
                 itemBuilder: (context) => [
@@ -261,7 +289,8 @@ class _DashboardPageState extends State<DashboardPage> {
                 ],
               ),
               IconButton(
-                icon: Icon(Icons.info_outline, color: Theme.of(context).colorScheme.onPrimary),
+                icon: Icon(Icons.info_outline,
+                    color: Theme.of(context).colorScheme.onPrimary),
                 tooltip: 'About',
                 onPressed: () => _showAboutDialog(context),
               ),
@@ -296,7 +325,9 @@ class _DashboardPageState extends State<DashboardPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.lock, size: 64, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  Icon(Icons.lock,
+                      size: 64,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
                   const SizedBox(height: 16),
                   const Text(
                     'Encrypted Backup Detected',
@@ -305,7 +336,8 @@ class _DashboardPageState extends State<DashboardPage> {
                   const SizedBox(height: 8),
                   Text(
                     'Please provide the password to decrypt your backup.',
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton.icon(
@@ -323,7 +355,8 @@ class _DashboardPageState extends State<DashboardPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.error, size: 64, color: Theme.of(context).colorScheme.error),
+                  Icon(Icons.error,
+                      size: 64, color: Theme.of(context).colorScheme.error),
                   const SizedBox(height: 16),
                   const Text(
                     'Failed to Load Backup',
@@ -332,7 +365,8 @@ class _DashboardPageState extends State<DashboardPage> {
                   const SizedBox(height: 8),
                   Text(
                     otpState.encryptionError!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
@@ -367,7 +401,8 @@ class _DashboardPageState extends State<DashboardPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.security, size: 64, color: Theme.of(context).colorScheme.primary),
+                  Icon(Icons.security,
+                      size: 64, color: Theme.of(context).colorScheme.primary),
                   const SizedBox(height: 16),
                   const Text(
                     'Welcome to LibreOTP',
@@ -376,7 +411,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   const SizedBox(height: 8),
                   Text(
                     'Import your 2FAS backup to get started',
-                    style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    style: TextStyle(
+                        fontSize: 16,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton.icon(
@@ -391,7 +428,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   const SizedBox(height: 16),
                   Text(
                     'Export your data from the 2FAS app and select the JSON file',
-                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                     textAlign: TextAlign.center,
                   ),
                 ],
@@ -411,7 +450,8 @@ class _DashboardPageState extends State<DashboardPage> {
                     },
                     onChanged: (_) => _updateSearchQuery(),
                     displayMode: otpState.displayMode,
-                    onDisplayModeChanged: (mode) => otpState.setDisplayMode(mode),
+                    onDisplayModeChanged: (mode) =>
+                        otpState.setDisplayMode(mode),
                   ),
                   Expanded(
                     child: Container(
@@ -426,6 +466,8 @@ class _DashboardPageState extends State<DashboardPage> {
                             groupNames: otpState.getGroupNames(),
                             onRowTap: (groupId, index) =>
                                 otpState.generateOtp(groupId, index, context),
+                            onEditService: (service) =>
+                                _showEditDialog(context, service),
                             sortAscending: _sortAscending,
                           ),
                         ),

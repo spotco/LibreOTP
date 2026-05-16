@@ -322,6 +322,37 @@ class OtpState extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool updateServiceDetails({
+    required String serviceId,
+    required String name,
+    required String account,
+  }) {
+    final serviceIndex =
+        _services.indexWhere((service) => service.id == serviceId);
+    if (serviceIndex == -1) {
+      return false;
+    }
+
+    final currentService = _services[serviceIndex];
+    final updatedName = name.trim();
+    final updatedAccount = account.trim();
+
+    if (currentService.name == updatedName &&
+        currentService.otp.account == updatedAccount) {
+      return true;
+    }
+
+    _services[serviceIndex] = currentService.copyWith(
+      name: updatedName,
+      otp: currentService.otp.copyWith(account: updatedAccount),
+    );
+    _groupedServices = _groupServicesByGroup();
+    _clearUsageSortCache();
+    _scheduleDebouncedSave();
+    notifyListeners();
+    return true;
+  }
+
   void _clearUsageSortCache() {
     _usageResortTimer?.cancel();
     _usageResortTimer = null;
