@@ -9,6 +9,7 @@ class OtpTable extends StatelessWidget {
   final Map<String, List<OtpService>> groupedServices;
   final Map<String, String> groupNames;
   final Function(String, int) onRowTap;
+  final Future<void> Function(OtpService service) onEditService;
   final bool sortAscending;
 
   const OtpTable({
@@ -16,6 +17,7 @@ class OtpTable extends StatelessWidget {
     required this.groupedServices,
     required this.groupNames,
     required this.onRowTap,
+    required this.onEditService,
     required this.sortAscending,
   });
 
@@ -86,6 +88,7 @@ class OtpTable extends StatelessWidget {
     final constraints = BoxConstraints(
       maxWidth: MediaQuery.of(context).size.width,
     );
+    final colorScheme = Theme.of(context).colorScheme;
     final iconWidth = 40.0;
     final nameWidth = constraints.maxWidth * 0.22;
     final accountWidth = constraints.maxWidth * 0.22;
@@ -100,7 +103,14 @@ class OtpTable extends StatelessWidget {
       String groupName = groupNames[entry.key] ?? 'Unknown Group';
 
       // Add group header row
-      rows.add(GroupHeader(key: ValueKey('header:${entry.key}'), groupName: groupName));
+      rows.add(
+        GroupHeader(
+          key: ValueKey('header:${entry.key}'),
+          groupName: groupName,
+          backgroundColor: colorScheme.surfaceContainerHighest,
+          textColor: colorScheme.onSurface,
+        ),
+      );
 
       // Add service rows
       for (int i = 0; i < entry.value.length; i++) {
@@ -114,6 +124,7 @@ class OtpTable extends StatelessWidget {
             service: service,
             displayState: displayState,
             onTap: () => onRowTap(entry.key, i),
+            onEdit: () => onEditService(service),
             iconWidth: iconWidth,
             nameWidth: nameWidth,
             accountWidth: accountWidth,
