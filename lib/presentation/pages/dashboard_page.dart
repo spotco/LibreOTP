@@ -21,6 +21,7 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   final TextEditingController _searchController = TextEditingController();
+  final Set<String> _collapsedGroupIds = {};
   int? _sortColumnIndex;
   bool _sortAscending = true;
 
@@ -75,6 +76,30 @@ class _DashboardPageState extends State<DashboardPage> {
       _sortColumnIndex = columnIndex;
       _sortAscending = ascending;
     });
+  }
+
+  void _toggleGroup(String groupId) {
+    setState(() {
+      if (_collapsedGroupIds.contains(groupId)) {
+        _collapsedGroupIds.remove(groupId);
+      } else {
+        _collapsedGroupIds.add(groupId);
+      }
+    });
+  }
+
+  Future<void> _moveServiceToHidden(OtpService service) async {
+    context.read<OtpState>().moveServiceToGroup(
+          serviceId: service.id,
+          targetGroupId: OtpState.hiddenGroupId,
+        );
+  }
+
+  Future<void> _moveServiceToDefault(OtpService service) async {
+    context.read<OtpState>().moveServiceToGroup(
+          serviceId: service.id,
+          targetGroupId: OtpState.defaultGroupId,
+        );
   }
 
   Future<void> _showEditDialog(BuildContext context, OtpService service) async {
@@ -534,6 +559,10 @@ class _DashboardPageState extends State<DashboardPage> {
                                 .generateOtpForService(service.id, context),
                             onEditService: (service) =>
                                 _showEditDialog(context, service),
+                            onMoveToHidden: _moveServiceToHidden,
+                            onMoveToDefault: _moveServiceToDefault,
+                            collapsedGroupIds: _collapsedGroupIds,
+                            onGroupToggle: _toggleGroup,
                             sortColumnIndex: _sortColumnIndex,
                             sortAscending: _sortAscending,
                             onSort: (columnIndex, _) => _handleTableSort(

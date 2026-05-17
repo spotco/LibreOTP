@@ -31,6 +31,8 @@ void main() {
       required OtpDisplayState displayState,
       VoidCallback? onTap,
       Future<void> Function()? onEdit,
+      Future<void> Function()? onMoveToHidden,
+      Future<void> Function()? onMoveToDefault,
     }) {
       return MaterialApp(
         home: Scaffold(
@@ -49,6 +51,8 @@ void main() {
                 displayState: displayState,
                 onTap: onTap ?? () {},
                 onEdit: onEdit ?? () async {},
+                onMoveToHidden: onMoveToHidden,
+                onMoveToDefault: onMoveToDefault,
                 iconWidth: 40,
                 nameWidth: 200,
                 accountWidth: 200,
@@ -239,6 +243,46 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(editCount, equals(1));
+      });
+
+      testWidgets('should show move to hidden action when provided',
+          (WidgetTester tester) async {
+        await tester.pumpWidget(createTestWidget(
+          service: testService,
+          displayState: emptyDisplayState,
+          onMoveToHidden: () async {},
+        ));
+
+        final nameCell = find.text('GitHub');
+        final gesture = await tester.createGesture(
+          kind: PointerDeviceKind.mouse,
+          buttons: kSecondaryMouseButton,
+        );
+        await gesture.down(tester.getCenter(nameCell));
+        await gesture.up();
+        await tester.pumpAndSettle();
+
+        expect(find.text('Move to Hidden'), findsOneWidget);
+      });
+
+      testWidgets('should show move to default action when provided',
+          (WidgetTester tester) async {
+        await tester.pumpWidget(createTestWidget(
+          service: testService,
+          displayState: emptyDisplayState,
+          onMoveToDefault: () async {},
+        ));
+
+        final nameCell = find.text('GitHub');
+        final gesture = await tester.createGesture(
+          kind: PointerDeviceKind.mouse,
+          buttons: kSecondaryMouseButton,
+        );
+        await gesture.down(tester.getCenter(nameCell));
+        await gesture.up();
+        await tester.pumpAndSettle();
+
+        expect(find.text('Move to Default'), findsOneWidget);
       });
     });
 

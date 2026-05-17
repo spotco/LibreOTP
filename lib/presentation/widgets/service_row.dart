@@ -10,6 +10,8 @@ class ServiceRow extends DataRow {
     required OtpDisplayState displayState,
     required Function() onTap,
     required Future<void> Function() onEdit,
+    Future<void> Function()? onMoveToHidden,
+    Future<void> Function()? onMoveToDefault,
     required double iconWidth,
     required double nameWidth,
     required double accountWidth,
@@ -23,6 +25,8 @@ class ServiceRow extends DataRow {
                 width: iconWidth,
                 onTap: onTap,
                 onEdit: onEdit,
+                onMoveToHidden: onMoveToHidden,
+                onMoveToDefault: onMoveToDefault,
                 child: TwoFasIconService.buildServiceIcon(
                   service.name,
                   service.otp.issuer,
@@ -35,6 +39,8 @@ class ServiceRow extends DataRow {
                 width: nameWidth,
                 onTap: onTap,
                 onEdit: onEdit,
+                onMoveToHidden: onMoveToHidden,
+                onMoveToDefault: onMoveToDefault,
                 child: Text(service.name),
               ),
             ),
@@ -43,6 +49,8 @@ class ServiceRow extends DataRow {
                 width: accountWidth,
                 onTap: onTap,
                 onEdit: onEdit,
+                onMoveToHidden: onMoveToHidden,
+                onMoveToDefault: onMoveToDefault,
                 child: Text(service.otp.account),
               ),
             ),
@@ -51,6 +59,8 @@ class ServiceRow extends DataRow {
                 width: issuerWidth,
                 onTap: onTap,
                 onEdit: onEdit,
+                onMoveToHidden: onMoveToHidden,
+                onMoveToDefault: onMoveToDefault,
                 child: Text(service.otp.issuer),
               ),
             ),
@@ -59,6 +69,8 @@ class ServiceRow extends DataRow {
                 width: otpWidth,
                 onTap: onTap,
                 onEdit: onEdit,
+                onMoveToHidden: onMoveToHidden,
+                onMoveToDefault: onMoveToDefault,
                 child: Text(displayState.otpCode),
               ),
             ),
@@ -67,6 +79,8 @@ class ServiceRow extends DataRow {
                 width: validityWidth,
                 onTap: onTap,
                 onEdit: onEdit,
+                onMoveToHidden: onMoveToHidden,
+                onMoveToDefault: onMoveToDefault,
                 child: Text(displayState.validity),
               ),
             ),
@@ -79,6 +93,8 @@ class ServiceRow extends DataRow {
     required Widget child,
     required VoidCallback onTap,
     required Future<void> Function() onEdit,
+    Future<void> Function()? onMoveToHidden,
+    Future<void> Function()? onMoveToDefault,
   }) {
     return Builder(
       builder: (context) {
@@ -86,6 +102,29 @@ class ServiceRow extends DataRow {
           behavior: HitTestBehavior.opaque,
           onTap: onTap,
           onSecondaryTapDown: (details) async {
+            final items = <PopupMenuEntry<_ServiceRowAction>>[
+              const PopupMenuItem<_ServiceRowAction>(
+                value: _ServiceRowAction.edit,
+                child: Text('Edit entry'),
+              ),
+            ];
+            if (onMoveToHidden != null) {
+              items.add(
+                const PopupMenuItem<_ServiceRowAction>(
+                  value: _ServiceRowAction.moveToHidden,
+                  child: Text('Move to Hidden'),
+                ),
+              );
+            }
+            if (onMoveToDefault != null) {
+              items.add(
+                const PopupMenuItem<_ServiceRowAction>(
+                  value: _ServiceRowAction.moveToDefault,
+                  child: Text('Move to Default'),
+                ),
+              );
+            }
+
             final selectedAction = await showMenu<_ServiceRowAction>(
               context: context,
               position: RelativeRect.fromLTRB(
@@ -94,16 +133,17 @@ class ServiceRow extends DataRow {
                 details.globalPosition.dx,
                 details.globalPosition.dy,
               ),
-              items: const [
-                PopupMenuItem<_ServiceRowAction>(
-                  value: _ServiceRowAction.edit,
-                  child: Text('Edit entry'),
-                ),
-              ],
+              items: items,
             );
 
             if (selectedAction == _ServiceRowAction.edit) {
               await onEdit();
+            } else if (selectedAction == _ServiceRowAction.moveToHidden &&
+                onMoveToHidden != null) {
+              await onMoveToHidden();
+            } else if (selectedAction == _ServiceRowAction.moveToDefault &&
+                onMoveToDefault != null) {
+              await onMoveToDefault();
             }
           },
           child: SizedBox(
@@ -118,4 +158,6 @@ class ServiceRow extends DataRow {
 
 enum _ServiceRowAction {
   edit,
+  moveToHidden,
+  moveToDefault,
 }

@@ -6,10 +6,18 @@ class GroupHeader extends DataRow {
     required String groupName,
     required Color backgroundColor,
     required Color textColor,
+    required bool isCollapsed,
+    VoidCallback? onToggle,
   }) : super(
           color: WidgetStateProperty.all(backgroundColor),
+          onSelectChanged: onToggle == null ? null : (_) => onToggle(),
           cells: [
-            const DataCell(Text('')), // Icon column
+            DataCell(
+              Icon(
+                isCollapsed ? Icons.chevron_right : Icons.expand_more,
+                color: textColor,
+              ),
+            ),
             DataCell(
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4.0),

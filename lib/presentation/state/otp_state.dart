@@ -15,6 +15,11 @@ import '../../services/twofas_icon_service.dart';
 import 'otp_display_state.dart';
 
 class OtpState extends ChangeNotifier {
+  static const String defaultGroupId = 'Ungrouped';
+  static const String hiddenGroupId = '__hidden__';
+  static const String defaultGroupName = 'Default';
+  static const String hiddenGroupName = 'Hidden';
+
   final StorageRepository _storageRepository;
   final OtpGenerator _otpGenerator;
 
@@ -371,9 +376,15 @@ class OtpState extends ChangeNotifier {
         ..sort((a, b) => a.order.position.compareTo(b.order.position));
     }
 
-    // Add ungrouped services
-    groupedData['Ungrouped'] = _services
+    // Add default (ungrouped) services
+    groupedData[defaultGroupId] = _services
         .where((service) => service.groupId == null)
+        .toList()
+      ..sort((a, b) => a.order.position.compareTo(b.order.position));
+
+    // Add hidden services
+    groupedData[hiddenGroupId] = _services
+        .where((service) => service.groupId == hiddenGroupId)
         .toList()
       ..sort((a, b) => a.order.position.compareTo(b.order.position));
 
@@ -395,8 +406,9 @@ class OtpState extends ChangeNotifier {
       }).toList();
     } else {
       // Compute fresh sort
-      sortedServices = List<OtpService>.from(_services)
-        ..sort((a, b) {
+      sortedServices = List<OtpService>.from(
+        _services.where((service) => service.groupId != hiddenGroupId),
+      )..sort((a, b) {
           // Primary sort: usage count (descending)
           final countComparison = b.usageCount.compareTo(a.usageCount);
           if (countComparison != 0) {
@@ -458,9 +470,54 @@ class OtpState extends ChangeNotifier {
     for (var group in _groups) {
       groupNames[group.id] = group.name;
     }
-    // Add synthetic "Ungrouped" group name
-    groupNames['Ungrouped'] = 'Ungrouped';
+    groupNames[defaultGroupId] = defaultGroupName;
+    groupNames[hiddenGroupId] = hiddenGroupName;
     return groupNames;
+  }
+
+  bool moveServiceToGroup({
+    required String serviceId,
+    required String? targetGroupId,
+  }) {
+    final serviceIndex =
+        _services.indexWhere((service) => service.id == serviceId);
+    if (serviceIndex == -1) {
+      return false;
+    }
+
+    final normalizedTargetGroupId =
+        targetGroupId == defaultGroupId ? null : targetGroupId;
+    final currentService = _services[serviceIndex];
+    if (currentService.groupId == normalizedTargetGroupId) {
+      return true;
+    }
+
+    final sourceGroupId = currentService.groupId;
+    final targetGroupServices = _services
+        .where((service) =>
+            service.id != serviceId &&
+            service.groupId == normalizedTargetGroupId)
+        .toList()
+      ..sort((a, b) => a.order.position.compareTo(b.order.position));
+
+    _services[serviceIndex] = OtpService(
+      id: currentService.id,
+      name: currentService.name,
+      groupId: normalizedTargetGroupId,
+      otp: currentService.otp,
+      order: OrderInfo(position: targetGroupServices.length),
+      secret: currentService.secret,
+      icon: currentService.icon,
+      usageCount: currentService.usageCount,
+      lastUsedAt: currentService.lastUsedAt,
+    );
+
+    _reindexGroupOrders({sourceGroupId, normalizedTargetGroupId});
+    _groupedServices = _groupServicesByGroup();
+    _clearUsageSortCache();
+    _scheduleDebouncedSave();
+    notifyListeners();
+    return true;
   }
 
   void generateOtpForService(String serviceId, BuildContext context) {
@@ -748,6 +805,27 @@ class OtpState extends ChangeNotifier {
           ),
         )
         .toList();
+  }
+
+  void _reindexGroupOrders(Set<String?> groupIds) {
+    for (final groupId in groupIds) {
+      final servicesInGroup = _services
+          .where((service) => service.groupId == groupId)
+          .toList()
+        ..sort((a, b) => a.order.position.compareTo(b.order.position));
+
+      for (var i = 0; i < servicesInGroup.length; i++) {
+        final service = servicesInGroup[i];
+        final serviceIndex =
+            _services.indexWhere((current) => current.id == service.id);
+        if (serviceIndex == -1) {
+          continue;
+        }
+        _services[serviceIndex] = service.copyWith(
+          order: OrderInfo(position: i),
+        );
+      }
+    }
   }
 
   /// Preloads icons for the current services asynchronously

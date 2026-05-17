@@ -10,6 +10,10 @@ class OtpTable extends StatelessWidget {
   final Map<String, String> groupNames;
   final void Function(OtpService service) onRowTap;
   final Future<void> Function(OtpService service) onEditService;
+  final Future<void> Function(OtpService service) onMoveToHidden;
+  final Future<void> Function(OtpService service) onMoveToDefault;
+  final Set<String> collapsedGroupIds;
+  final void Function(String groupId) onGroupToggle;
   final int? sortColumnIndex;
   final bool sortAscending;
   final void Function(int columnIndex, bool ascending) onSort;
@@ -20,6 +24,10 @@ class OtpTable extends StatelessWidget {
     required this.groupNames,
     required this.onRowTap,
     required this.onEditService,
+    required this.onMoveToHidden,
+    required this.onMoveToDefault,
+    required this.collapsedGroupIds,
+    required this.onGroupToggle,
     required this.sortColumnIndex,
     required this.sortAscending,
     required this.onSort,
@@ -107,19 +115,27 @@ class OtpTable extends StatelessWidget {
     List<DataRow> rows = [];
 
     for (final entry in groupedServices.entries) {
-      String groupName = groupNames[entry.key] ?? 'Unknown Group';
+      final groupId = entry.key;
+      String groupName = groupNames[groupId] ?? 'Unknown Group';
+      final isCollapsed = collapsedGroupIds.contains(groupId);
       final sortedServices =
           sortServicesForTable(entry.value, sortColumnIndex, sortAscending);
 
       // Add group header row
       rows.add(
         GroupHeader(
-          key: ValueKey('header:${entry.key}'),
+          key: ValueKey('header:$groupId'),
           groupName: groupName,
           backgroundColor: colorScheme.surfaceContainerHighest,
           textColor: colorScheme.onSurface,
+          isCollapsed: isCollapsed,
+          onToggle: () => onGroupToggle(groupId),
         ),
       );
+
+      if (isCollapsed) {
+        continue;
+      }
 
       // Add service rows
       for (final service in sortedServices) {
@@ -131,6 +147,12 @@ class OtpTable extends StatelessWidget {
             displayState: displayState,
             onTap: () => onRowTap(service),
             onEdit: () => onEditService(service),
+            onMoveToHidden: groupId == OtpState.defaultGroupId
+                ? () => onMoveToHidden(service)
+                : null,
+            onMoveToDefault: groupId == OtpState.hiddenGroupId
+                ? () => onMoveToDefault(service)
+                : null,
             iconWidth: iconWidth,
             nameWidth: nameWidth,
             accountWidth: accountWidth,

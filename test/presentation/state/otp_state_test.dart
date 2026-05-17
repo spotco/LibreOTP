@@ -225,6 +225,45 @@ void main() {
         expect(() => otpState.getGroupNames(), returnsNormally);
         expect(otpState.getGroupNames(), isA<Map<String, String>>());
       });
+
+      test('should expose synthetic default and hidden group names', () {
+        final groupNames = otpState.getGroupNames();
+        expect(groupNames[OtpState.defaultGroupId],
+            equals(OtpState.defaultGroupName));
+        expect(groupNames[OtpState.hiddenGroupId],
+            equals(OtpState.hiddenGroupName));
+      });
+
+      test('should move a default service to hidden and back', () async {
+        final testService = OtpService(
+          id: 'service-1',
+          name: 'Test Service',
+          secret: 'JBSWY3DPEHPK3PXP',
+          otp: const OtpConfig(account: 'test@example.com', issuer: 'Test'),
+          order: const OrderInfo(position: 0),
+        );
+
+        mockRepository.setTestData([], [testService]);
+        await otpState.initializeData();
+
+        final movedToHidden = otpState.moveServiceToGroup(
+          serviceId: 'service-1',
+          targetGroupId: OtpState.hiddenGroupId,
+        );
+        expect(movedToHidden, isTrue);
+        expect(otpState.groupedServices[OtpState.hiddenGroupId]!.single.id,
+            equals('service-1'));
+        expect(otpState.groupedServices[OtpState.defaultGroupId], isEmpty);
+
+        final movedToDefault = otpState.moveServiceToGroup(
+          serviceId: 'service-1',
+          targetGroupId: OtpState.defaultGroupId,
+        );
+        expect(movedToDefault, isTrue);
+        expect(otpState.groupedServices[OtpState.defaultGroupId]!.single.id,
+            equals('service-1'));
+        expect(otpState.groupedServices[OtpState.hiddenGroupId], isEmpty);
+      });
     });
 
     group('State notifications', () {
