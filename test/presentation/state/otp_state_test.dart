@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -27,6 +28,10 @@ class MockStorageRepository extends StorageRepository {
   String? encryptedSavePassword;
   String? migratedPassword;
   StorageDataSource? savedSource;
+  Completer<LoadedAppData>? pendingLoadStoredData;
+  Completer<void>? pendingSaveData;
+  Completer<void>? pendingMigrate;
+  Completer<AppData>? pendingImportBackup;
 
   MockStorageRepository() {
     final tempDir = Directory.systemTemp;
@@ -44,6 +49,9 @@ class MockStorageRepository extends StorageRepository {
 
   @override
   Future<LoadedAppData> loadStoredData({String? password}) async {
+    if (pendingLoadStoredData != null) {
+      return pendingLoadStoredData!.future;
+    }
     if (storedLoadException != null) {
       throw storedLoadException!;
     }
@@ -63,6 +71,9 @@ class MockStorageRepository extends StorageRepository {
     savedData = data;
     savedSource = source;
     encryptedSavePassword = password;
+    if (pendingSaveData != null) {
+      await pendingSaveData!.future;
+    }
   }
 
   @override
@@ -78,10 +89,16 @@ class MockStorageRepository extends StorageRepository {
   ) async {
     migratedData = data;
     migratedPassword = password;
+    if (pendingMigrate != null) {
+      await pendingMigrate!.future;
+    }
   }
 
   @override
   Future<AppData> importBackupFile(String filePath, {String? password}) async {
+    if (pendingImportBackup != null) {
+      return pendingImportBackup!.future;
+    }
     return AppData(groups: _importGroups, services: _importServices);
   }
 
@@ -428,6 +445,76 @@ void main() {
         expect(mockRepository.savedSource,
             equals(StorageDataSource.encryptedVault));
         expect(mockRepository.encryptedSavePassword, equals('new-password'));
+      });
+
+      test('should expose busy state while unlocking the encrypted vault',
+          () async {
+        mockRepository.setStoredLoadException(
+          const StoragePasswordRequiredException(
+            StorageDataSource.encryptedVault,
+            'Password required for encrypted vault',
+          ),
+        );
+
+        await otpState.initializeData();
+
+        mockRepository.storedLoadException = null;
+        mockRepository.pendingLoadStoredData = Completer<LoadedAppData>();
+
+        final unlockFuture = otpState.loadDataWithPassword('vault-password');
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+
+        expect(otpState.isBusy, isTrue);
+        expect(otpState.busyMessage, equals('Unlocking encrypted vault...'));
+
+        mockRepository.pendingLoadStoredData!.complete(
+          LoadedAppData(
+            data: AppData(groups: const [], services: const []),
+            source: StorageDataSource.encryptedVault,
+          ),
+        );
+
+        await unlockFuture;
+
+        expect(otpState.isBusy, isFalse);
+        expect(otpState.busyMessage, isNull);
+      });
+
+      test('should expose busy state while migrating plaintext data', () async {
+        mockRepository.storedLoadResult = LoadedAppData(
+          data: AppData(
+            groups: const [Group(id: 'group-id', name: 'Work')],
+            services: const [
+              OtpService(
+                id: 'service-id',
+                name: 'GitHub',
+                secret: 'SECRET1',
+                otp: OtpConfig(
+                  account: 'dev@example.com',
+                  issuer: 'GitHub',
+                ),
+                order: OrderInfo(position: 0),
+              ),
+            ],
+          ),
+          source: StorageDataSource.plaintextJson,
+        );
+
+        await otpState.initializeData();
+        mockRepository.pendingMigrate = Completer<void>();
+
+        final migrateFuture =
+            otpState.migratePlaintextDataToEncryptedVault('vault-password');
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+
+        expect(otpState.isBusy, isTrue);
+        expect(otpState.busyMessage, equals('Encrypting local data...'));
+
+        mockRepository.pendingMigrate!.complete();
+        await migrateFuture;
+
+        expect(otpState.isBusy, isFalse);
+        expect(otpState.busyMessage, isNull);
       });
     });
 

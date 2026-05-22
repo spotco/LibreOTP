@@ -18,6 +18,13 @@ enum PasswordPromptReason {
   encryptedBackup,
 }
 
+enum BusyOperation {
+  unlockingVault,
+  decryptingBackup,
+  encryptingLocalData,
+  changingVaultPassword,
+}
+
 class OtpState extends ChangeNotifier {
   static const String defaultGroupId = 'Ungrouped';
   static const String hiddenGroupId = '__hidden__';
@@ -49,11 +56,37 @@ class OtpState extends ChangeNotifier {
   bool _shouldPromptForEncryptionMigration = false;
   StorageDataSource _activeStorageSource = StorageDataSource.none;
   String? _localVaultPassword;
+  BusyOperation? _busyOperation;
 
   // Helper method to yield control to allow UI updates
   Future<void> _yieldToUI([int milliseconds = 16]) async {
     // Give enough time for multiple UI frames - tests will pump through these quickly
     await Future.delayed(Duration(milliseconds: milliseconds));
+  }
+
+  Future<T> _runBusyOperation<T>(
+    BusyOperation operation,
+    Future<T> Function() action,
+  ) async {
+    final changedOperation = _busyOperation != operation;
+    if (changedOperation) {
+      _busyOperation = operation;
+      if (!_disposed) {
+        notifyListeners();
+      }
+      await _yieldToUI();
+    }
+
+    try {
+      return await action();
+    } finally {
+      if (_busyOperation == operation) {
+        _busyOperation = null;
+        if (!_disposed) {
+          notifyListeners();
+        }
+      }
+    }
   }
 
   /// Creates a new OtpState instance.
@@ -99,6 +132,21 @@ class OtpState extends ChangeNotifier {
   bool get canEncryptLocalData =>
       !usesEncryptedLocalStorage &&
       (_services.isNotEmpty || _groups.isNotEmpty);
+  bool get isBusy => _busyOperation != null;
+  String? get busyMessage {
+    switch (_busyOperation) {
+      case BusyOperation.unlockingVault:
+        return 'Unlocking encrypted vault...';
+      case BusyOperation.decryptingBackup:
+        return 'Decrypting encrypted backup...';
+      case BusyOperation.encryptingLocalData:
+        return 'Encrypting local data...';
+      case BusyOperation.changingVaultPassword:
+        return 'Updating vault password...';
+      case null:
+        return null;
+    }
+  }
 
   OtpDisplayState getOtpDisplayState(String serviceKey) {
     return _otpDisplayStates[serviceKey] ?? OtpDisplayState.empty;
@@ -263,32 +311,38 @@ class OtpState extends ChangeNotifier {
     _encryptionError = null;
     notifyListeners();
 
-    try {
-      final result =
-          await _storageRepository.loadStoredData(password: password);
-      _applyLoadedData(result, password: password);
-      _groupedServices = _groupServicesByGroup();
-      _requiresPassword = false;
-      _passwordPromptReason = PasswordPromptReason.none;
+    final busyOperation = _passwordPromptReason == PasswordPromptReason.encryptedVault
+        ? BusyOperation.unlockingVault
+        : BusyOperation.decryptingBackup;
 
-      // Preload icons for imported services asynchronously
-      _preloadIconsForServices();
-    } on StoragePasswordRequiredException catch (e) {
-      _requiresPassword = true;
-      _passwordPromptReason = e.source == StorageDataSource.encryptedVault
-          ? PasswordPromptReason.encryptedVault
-          : PasswordPromptReason.encryptedBackup;
-    } on StorageLoadException catch (e) {
-      _encryptionError = e.toString();
-      _requiresPassword = true;
-      _passwordPromptReason = e.source == StorageDataSource.encryptedVault
-          ? PasswordPromptReason.encryptedVault
-          : PasswordPromptReason.encryptedBackup;
-      debugPrint('Error loading encrypted data: $e');
-    } catch (e) {
-      _encryptionError = e.toString();
-      debugPrint('Error loading encrypted data: $e');
-    }
+    await _runBusyOperation(busyOperation, () async {
+      try {
+        final result =
+            await _storageRepository.loadStoredData(password: password);
+        _applyLoadedData(result, password: password);
+        _groupedServices = _groupServicesByGroup();
+        _requiresPassword = false;
+        _passwordPromptReason = PasswordPromptReason.none;
+
+        // Preload icons for imported services asynchronously
+        _preloadIconsForServices();
+      } on StoragePasswordRequiredException catch (e) {
+        _requiresPassword = true;
+        _passwordPromptReason = e.source == StorageDataSource.encryptedVault
+            ? PasswordPromptReason.encryptedVault
+            : PasswordPromptReason.encryptedBackup;
+      } on StorageLoadException catch (e) {
+        _encryptionError = e.toString();
+        _requiresPassword = true;
+        _passwordPromptReason = e.source == StorageDataSource.encryptedVault
+            ? PasswordPromptReason.encryptedVault
+            : PasswordPromptReason.encryptedBackup;
+        debugPrint('Error loading encrypted data: $e');
+      } catch (e) {
+        _encryptionError = e.toString();
+        debugPrint('Error loading encrypted data: $e');
+      }
+    });
 
     _isLoading = false;
     notifyListeners();
@@ -657,35 +711,49 @@ class OtpState extends ChangeNotifier {
     _encryptionError = null;
     notifyListeners();
 
-    try {
-      final data = await _storageRepository.importBackupFile(filePath,
-          password: password);
-      final importResult = _mergeImportedData(data);
-      _setStorageModeAfterImport();
-      _groupedServices = _groupServicesByGroup();
-      _hasExistingData = true;
-      _requiresPassword = false;
-      _passwordPromptReason = PasswordPromptReason.none;
-      _isLoading = false;
-      await _persistCurrentData();
-      notifyListeners();
+    final busyOperation = password != null
+        ? BusyOperation.decryptingBackup
+        : usesEncryptedLocalStorage
+            ? BusyOperation.encryptingLocalData
+            : null;
 
-      // Preload icons for imported services asynchronously
-      _preloadIconsForServices();
+    Future<ImportBackupResult?> performImport() async {
+      try {
+        final data = await _storageRepository.importBackupFile(filePath,
+            password: password);
+        final importResult = _mergeImportedData(data);
+        _setStorageModeAfterImport();
+        _groupedServices = _groupServicesByGroup();
+        _hasExistingData = true;
+        _requiresPassword = false;
+        _passwordPromptReason = PasswordPromptReason.none;
+        _isLoading = false;
+        await _persistCurrentData();
+        notifyListeners();
 
-      return importResult;
-    } catch (e) {
-      if (e.toString().contains('Password required')) {
-        _requiresPassword = true;
-        _passwordPromptReason = PasswordPromptReason.encryptedBackup;
-        _encryptionError = null;
-      } else {
-        _encryptionError = 'Failed to import backup: $e';
+        // Preload icons for imported services asynchronously
+        _preloadIconsForServices();
+
+        return importResult;
+      } catch (e) {
+        if (e.toString().contains('Password required')) {
+          _requiresPassword = true;
+          _passwordPromptReason = PasswordPromptReason.encryptedBackup;
+          _encryptionError = null;
+        } else {
+          _encryptionError = 'Failed to import backup: $e';
+        }
+        _isLoading = false;
+        notifyListeners();
+        return null;
       }
-      _isLoading = false;
-      notifyListeners();
-      return null;
     }
+
+    if (busyOperation == null) {
+      return performImport();
+    }
+
+    return _runBusyOperation(busyOperation, performImport);
   }
 
   /// Reimports data by opening file picker and importing selected file
@@ -706,16 +774,18 @@ class OtpState extends ChangeNotifier {
   }
 
   Future<void> migratePlaintextDataToEncryptedVault(String password) async {
-    final data = AppData(services: _services, groups: _groups);
-    await _storageRepository.migratePlaintextDataToEncryptedVault(
-      data,
-      password,
-    );
-    _activeStorageSource = StorageDataSource.encryptedVault;
-    _localVaultPassword = password;
-    _shouldPromptForEncryptionMigration = false;
-    _hasExistingData = true;
-    notifyListeners();
+    await _runBusyOperation(BusyOperation.encryptingLocalData, () async {
+      final data = AppData(services: _services, groups: _groups);
+      await _storageRepository.migratePlaintextDataToEncryptedVault(
+        data,
+        password,
+      );
+      _activeStorageSource = StorageDataSource.encryptedVault;
+      _localVaultPassword = password;
+      _shouldPromptForEncryptionMigration = false;
+      _hasExistingData = true;
+      notifyListeners();
+    });
   }
 
   Future<void> changeLocalVaultPassword(String password) async {
@@ -723,14 +793,16 @@ class OtpState extends ChangeNotifier {
       throw StateError('Encrypted local storage is not active');
     }
 
-    final data = AppData(services: _services, groups: _groups);
-    await _storageRepository.saveData(
-      data,
-      source: StorageDataSource.encryptedVault,
-      password: password,
-    );
-    _localVaultPassword = password;
-    notifyListeners();
+    await _runBusyOperation(BusyOperation.changingVaultPassword, () async {
+      final data = AppData(services: _services, groups: _groups);
+      await _storageRepository.saveData(
+        data,
+        source: StorageDataSource.encryptedVault,
+        password: password,
+      );
+      _localVaultPassword = password;
+      notifyListeners();
+    });
   }
 
   ImportBackupResult _mergeImportedData(AppData importedData) {

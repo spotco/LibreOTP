@@ -5,7 +5,8 @@ import 'display_mode.dart';
 
 class AppConfig {
   static const String appName = 'LibreOTP';
-  static const String githubUrl = 'https://github.com/henricook/libreotp';
+  static const String aboutAppName = 'LibreOTP (spotco build)';
+  static const String githubUrl = 'https://github.com/spotco/LibreOTP';
 
   // Preference keys
   static const String _themePreferenceKey = 'theme_mode';

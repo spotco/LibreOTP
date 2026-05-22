@@ -13,10 +13,21 @@ class AboutPage extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Text(
+            AppConfig.aboutAppName,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
           FutureBuilder<String>(
-            future: AppConfig.getAppTitle(),
+            future: AppConfig.getAppVersion(),
             builder: (context, snapshot) {
-              return Text(snapshot.data ?? 'LibreOTP');
+              if (!snapshot.hasData) {
+                return const SizedBox.shrink();
+              }
+              return Text(snapshot.data!);
             },
           ),
           const SizedBox(height: 8),

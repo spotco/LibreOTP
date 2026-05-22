@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -20,6 +21,20 @@ class LocalVaultEncryptionService {
     String password, {
     int iterations = defaultIterations,
   }) async {
+    return Isolate.run(
+      () => _encryptSync(
+        plaintextJson,
+        password,
+        iterations: iterations,
+      ),
+    );
+  }
+
+  static Uint8List _encryptSync(
+    String plaintextJson,
+    String password, {
+    required int iterations,
+  }) {
     if (password.isEmpty) {
       throw ArgumentError('Password required for encrypted vault');
     }
@@ -54,6 +69,13 @@ class LocalVaultEncryptionService {
     Uint8List vaultBytes,
     String password,
   ) async {
+    return Isolate.run(() => _decryptSync(vaultBytes, password));
+  }
+
+  static String _decryptSync(
+    Uint8List vaultBytes,
+    String password,
+  ) {
     if (password.isEmpty) {
       throw ArgumentError('Password required for encrypted vault');
     }

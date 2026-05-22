@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:typed_data';
 import 'package:pointycastle/export.dart';
 
@@ -19,6 +20,15 @@ class TwoFasDecryptionService {
 
   static Future<String> decryptBackup(
       Map<String, dynamic> backupData, String password) async {
+    if (!isEncrypted(backupData)) {
+      throw ArgumentError('Backup file is not encrypted');
+    }
+
+    return Isolate.run(() => _decryptBackupSync(backupData, password));
+  }
+
+  static String _decryptBackupSync(
+      Map<String, dynamic> backupData, String password) {
     if (!isEncrypted(backupData)) {
       throw ArgumentError('Backup file is not encrypted');
     }
@@ -45,8 +55,7 @@ class TwoFasDecryptionService {
 
     // Verify password using reference field if available
     if (backupData.containsKey('reference')) {
-      if (!await _verifyPassword(
-          backupData['reference'] as String, password, salt)) {
+      if (!_verifyPassword(backupData['reference'] as String, password, salt)) {
         throw ArgumentError('Invalid password');
       }
     }
@@ -57,8 +66,8 @@ class TwoFasDecryptionService {
     return utf8.decode(plainText);
   }
 
-  static Future<bool> _verifyPassword(
-      String reference, String password, Uint8List salt) async {
+  static bool _verifyPassword(
+      String reference, String password, Uint8List salt) {
     try {
       final referenceParts = reference.split(':');
       if (referenceParts.length != 3) return false;

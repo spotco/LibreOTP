@@ -230,6 +230,23 @@ when present. If neither file exists, startup continues with empty app data.
 - [ ] Generate OTPs and confirm usage updates persist after restart in encrypted
   mode.
 
+## Step 15 - Responsive Encryption UX
+
+- [x] Document that PBKDF2 and AES-GCM work must run off the UI isolate so
+  Flutter can repaint while vault operations are in progress.
+- [x] Move local vault encrypt and decrypt calls onto a worker isolate.
+- [x] Move encrypted 2FAS backup decrypt calls onto a worker isolate.
+- [x] Add explicit busy-operation state in `OtpState` for vault unlock, backup
+  decrypt, local vault encryption, and vault password changes.
+- [x] Let the busy state yield one frame before starting the heavy crypto so the
+  modal progress UI can appear first.
+- [x] Render a non-dismissible loading popup over `DashboardPage` while those
+  busy operations run, then remove it automatically in `finally`.
+- [x] Keep the existing full-page startup loading state for initial bootstrap,
+  but avoid replacing the whole page during post-startup encryption flows.
+- [x] Keep debounced background encrypted saves non-modal so normal OTP use does
+  not keep interrupting the user with a popup.
+
 ## Open Questions
 
 - [x] Keep local vault passwords memory-only for the current app session. Do

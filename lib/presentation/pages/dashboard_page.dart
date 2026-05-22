@@ -600,9 +600,11 @@ class _DashboardPageState extends State<DashboardPage> {
       body: Consumer<OtpState>(
         builder: (context, otpState, child) {
           _checkForEncryptionMigrationPrompt();
+          final showFullScreenLoading = otpState.isLoading && !otpState.isBusy;
+          late final Widget content;
 
-          if (otpState.isLoading) {
-            return Center(
+          if (showFullScreenLoading) {
+            content = Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -618,11 +620,9 @@ class _DashboardPageState extends State<DashboardPage> {
                 ],
               ),
             );
-          }
-
-          if (otpState.requiresPassword) {
+          } else if (otpState.requiresPassword) {
             final isLocalVault = otpState.requiresLocalVaultPassword;
-            return Center(
+            content = Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -634,7 +634,10 @@ class _DashboardPageState extends State<DashboardPage> {
                     isLocalVault
                         ? 'Encrypted Vault Detected'
                         : 'Encrypted Backup Detected',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -653,11 +656,9 @@ class _DashboardPageState extends State<DashboardPage> {
                 ],
               ),
             );
-          }
-
-          if (otpState.encryptionError != null) {
+          } else if (otpState.encryptionError != null) {
             final isLocalVault = otpState.requiresLocalVaultPassword;
-            return Center(
+            content = Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -668,7 +669,10 @@ class _DashboardPageState extends State<DashboardPage> {
                     isLocalVault
                         ? 'Failed to Unlock Vault'
                         : 'Failed to Load Backup',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -701,11 +705,8 @@ class _DashboardPageState extends State<DashboardPage> {
                 ],
               ),
             );
-          }
-
-          // Show import UI when no data exists
-          if (!otpState.hasExistingData && otpState.services.isEmpty) {
-            return Center(
+          } else if (!otpState.hasExistingData && otpState.services.isEmpty) {
+            content = Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -744,57 +745,59 @@ class _DashboardPageState extends State<DashboardPage> {
                 ],
               ),
             );
-          }
-
-          return Stack(
-            children: [
-              Column(
-                children: [
-                  SearchBarWidget(
-                    controller: _searchController,
-                    onClear: () {
-                      _searchController.clear();
-                      _updateSearchQuery();
-                    },
-                    onChanged: (_) => _updateSearchQuery(),
-                    displayMode: otpState.displayMode,
-                    onDisplayModeChanged: (mode) =>
-                        otpState.setDisplayMode(mode),
-                  ),
-                  Expanded(
-                    child: Container(
-                      alignment: Alignment.topLeft,
-                      padding: const EdgeInsets.all(8.0),
+          } else {
+            content = Column(
+              children: [
+                SearchBarWidget(
+                  controller: _searchController,
+                  onClear: () {
+                    _searchController.clear();
+                    _updateSearchQuery();
+                  },
+                  onChanged: (_) => _updateSearchQuery(),
+                  displayMode: otpState.displayMode,
+                  onDisplayModeChanged: (mode) => otpState.setDisplayMode(mode),
+                ),
+                Expanded(
+                  child: Container(
+                    alignment: Alignment.topLeft,
+                    padding: const EdgeInsets.all(8.0),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.vertical,
                       child: SingleChildScrollView(
-                        scrollDirection: Axis.vertical,
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: OtpTable(
-                            groupedServices: otpState.groupedServices,
-                            groupNames: otpState.getGroupNames(),
-                            onRowTap: (service) => otpState
-                                .generateOtpForService(service.id, context),
-                            onEditService: (service) =>
-                                _showEditDialog(context, service),
-                            onMoveToHidden: _moveServiceToHidden,
-                            onMoveToDefault: _moveServiceToDefault,
-                            collapsedGroupIds: _collapsedGroupIds,
-                            onGroupToggle: _toggleGroup,
-                            sortColumnIndex: _sortColumnIndex,
-                            sortAscending: _sortAscending,
-                            onSort: (columnIndex, _) => _handleTableSort(
-                              columnIndex,
-                              _sortColumnIndex == columnIndex
-                                  ? !_sortAscending
-                                  : true,
-                            ),
+                        scrollDirection: Axis.horizontal,
+                        child: OtpTable(
+                          groupedServices: otpState.groupedServices,
+                          groupNames: otpState.getGroupNames(),
+                          onRowTap: (service) => otpState
+                              .generateOtpForService(service.id, context),
+                          onEditService: (service) =>
+                              _showEditDialog(context, service),
+                          onMoveToHidden: _moveServiceToHidden,
+                          onMoveToDefault: _moveServiceToDefault,
+                          collapsedGroupIds: _collapsedGroupIds,
+                          onGroupToggle: _toggleGroup,
+                          sortColumnIndex: _sortColumnIndex,
+                          sortAscending: _sortAscending,
+                          onSort: (columnIndex, _) => _handleTableSort(
+                            columnIndex,
+                            _sortColumnIndex == columnIndex
+                                ? !_sortAscending
+                                : true,
                           ),
                         ),
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
+            );
+          }
+
+          return Stack(
+            children: [
+              Positioned.fill(child: content),
+              if (otpState.isBusy) const _BusyOverlay(),
             ],
           );
         },
@@ -806,4 +809,45 @@ class _DashboardPageState extends State<DashboardPage> {
 enum _StorageAction {
   encryptLocalData,
   changeVaultPassword,
+}
+
+class _BusyOverlay extends StatelessWidget {
+  const _BusyOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    final otpState = context.watch<OtpState>();
+
+    return Stack(
+      children: [
+        const Positioned.fill(
+          child: ModalBarrier(
+            dismissible: false,
+            color: Colors.black54,
+          ),
+        ),
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 16),
+                    Text(
+                      otpState.busyMessage ?? 'Working with encrypted data...',
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
