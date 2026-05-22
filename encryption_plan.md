@@ -22,27 +22,27 @@ when present. If neither file exists, startup continues with empty app data.
 - [x] Evaluate the encrypted local vault design.
 - [x] Write this implementation plan.
 - [x] Implement local vault encryption service.
-- [ ] Add storage repository support for `data.bin`.
-- [ ] Add startup unlock and plaintext fallback behavior.
-- [ ] Add plaintext-to-encrypted migration prompt.
-- [ ] Add import-save behavior for encrypted local storage.
+- [x] Add storage repository support for `data.bin`.
+- [x] Add startup unlock and plaintext fallback behavior.
+- [x] Add plaintext-to-encrypted migration prompt.
+- [x] Add import-save behavior for encrypted local storage.
 - [x] Add focused tests.
-- [ ] Run targeted checks.
+- [x] Run targeted checks.
 
 ## Step 1 - Storage Format Contract
 
-- [ ] Define `data.bin` as LibreOTP local vault storage, separate from the 2FAS
+- [x] Define `data.bin` as LibreOTP local vault storage, separate from the 2FAS
   encrypted backup format.
-- [ ] Keep the decrypted `data.bin` plaintext exactly equivalent to the current
+- [x] Keep the decrypted `data.bin` plaintext exactly equivalent to the current
   `data.json` contents.
-- [ ] Reuse the same app data serializer for plaintext `data.json` writes and
+- [x] Reuse the same app data serializer for plaintext `data.json` writes and
   encrypted `data.bin` plaintext generation.
-- [ ] Ensure the plaintext JSON object contains `services` and `groups` at the
+- [x] Ensure the plaintext JSON object contains `services` and `groups` at the
   top level, with the same model `toJson()` output used today.
-- [ ] Do not add wrapper metadata inside the decrypted app data payload.
-- [ ] Store encryption metadata outside the decrypted app data payload in the
+- [x] Do not add wrapper metadata inside the decrypted app data payload.
+- [x] Store encryption metadata outside the decrypted app data payload in the
   `data.bin` envelope.
-- [ ] Version the `data.bin` envelope so future KDF or cipher changes can be
+- [x] Version the `data.bin` envelope so future KDF or cipher changes can be
   migrated.
 
 ## Step 2 - Encryption Algorithm and KDF
@@ -75,138 +75,138 @@ when present. If neither file exists, startup continues with empty app data.
 
 ## Step 4 - Storage Repository File Paths
 
-- [ ] Add `_encryptedDataFileName = 'data.bin'` in
+- [x] Add `_encryptedDataFileName = 'data.bin'` in
   `lib/data/repositories/storage_repository.dart`.
-- [ ] Add `getEncryptedLocalFile()` beside `getLocalFile()`.
-- [ ] Keep `getLocalFile()` returning the plaintext `data.json` path for
+- [x] Add `getEncryptedLocalFile()` beside `getLocalFile()`.
+- [x] Keep `getLocalFile()` returning the plaintext `data.json` path for
   compatibility and diagnostics.
-- [ ] Add helper methods for reading and writing the shared app data JSON
+- [x] Add helper methods for reading and writing the shared app data JSON
   payload.
-- [ ] Add helper methods for checking whether `data.bin` and `data.json` exist.
-- [ ] Ensure app support directory creation remains centralized.
+- [x] Add helper methods for checking whether `data.bin` and `data.json` exist.
+- [x] Ensure app support directory creation remains centralized.
 
 ## Step 5 - Startup Load Order
 
-- [ ] On startup, check for `data.bin` first.
-- [ ] If `data.bin` exists, attempt to load only `data.bin`.
-- [ ] If `data.bin` requires a password, show the local vault password prompt.
-- [ ] If `data.bin` fails because the password is wrong or the vault is
+- [x] On startup, check for `data.bin` first.
+- [x] If `data.bin` exists, attempt to load only `data.bin`.
+- [x] If `data.bin` requires a password, show the local vault password prompt.
+- [x] If `data.bin` fails because the password is wrong or the vault is
   corrupted, do not silently fall back to `data.json`.
-- [ ] After successful `data.bin` decrypt, parse the decrypted JSON exactly as
+- [x] After successful `data.bin` decrypt, parse the decrypted JSON exactly as
   `data.json` is parsed today.
-- [ ] If no `data.bin` exists, check for `data.json`.
-- [ ] If `data.json` exists, load it using the existing plaintext path.
-- [ ] If neither file exists, return empty services and groups.
-- [ ] Update state flags so the UI can distinguish encrypted vault unlock from
+- [x] If no `data.bin` exists, check for `data.json`.
+- [x] If `data.json` exists, load it using the existing plaintext path.
+- [x] If neither file exists, return empty services and groups.
+- [x] Update state flags so the UI can distinguish encrypted vault unlock from
   encrypted 2FAS import unlock.
 
 ## Step 6 - Password Dialog Updates
 
-- [ ] Make `PasswordDialog` configurable for local vault unlock, 2FAS import
+- [x] Make `PasswordDialog` configurable for local vault unlock, 2FAS import
   decrypt, and new vault password creation.
-- [ ] For local vault unlock, use vault-specific text instead of encrypted
+- [x] For local vault unlock, use vault-specific text instead of encrypted
   backup wording.
-- [ ] For new vault creation, prompt for password and confirmation.
-- [ ] Reject empty passwords.
-- [ ] Show a mismatch error when confirmation does not match.
-- [ ] Consider adding minimum password guidance without enforcing a surprising
+- [x] For new vault creation, prompt for password and confirmation.
+- [x] Reject empty passwords.
+- [x] Show a mismatch error when confirmation does not match.
+- [x] Consider adding minimum password guidance without enforcing a surprising
   rule.
-- [ ] Keep password values out of logs and debug output.
+- [x] Keep password values out of logs and debug output.
 
 ## Step 7 - Plaintext Migration Prompt
 
-- [ ] When startup successfully loads plaintext `data.json`, set a state flag
+- [x] When startup successfully loads plaintext `data.json`, set a state flag
   indicating plaintext local data is available for encryption.
-- [ ] Prompt the user with an option to encrypt local data.
-- [ ] If accepted, ask for a new local vault password.
-- [ ] Serialize current app data using the same serializer used for
+- [x] Prompt the user with an option to encrypt local data.
+- [x] If accepted, ask for a new local vault password.
+- [x] Serialize current app data using the same serializer used for
   `data.json`.
-- [ ] Encrypt that exact JSON string into `data.bin`.
-- [ ] Verify the newly written vault by decrypting it and parsing the app data.
-- [ ] After verification, remove plaintext secrets from `data.json`.
-- [ ] Prefer deleting `data.json`; if a marker is kept, it must not include
+- [x] Encrypt that exact JSON string into `data.bin`.
+- [x] Verify the newly written vault by decrypting it and parsing the app data.
+- [x] After verification, remove plaintext secrets from `data.json`.
+- [x] Prefer deleting `data.json`; if a marker is kept, it must not include
   service names, accounts, secrets, groups, or other sensitive app data.
-- [ ] If encryption or verification fails, leave the original `data.json`
+- [x] If encryption or verification fails, leave the original `data.json`
   untouched and report the error.
 
 ## Step 8 - Save Behavior After Encryption
 
-- [ ] Track current local storage mode as plaintext JSON or encrypted vault.
-- [ ] When mode is plaintext JSON, `saveData()` writes `data.json` as it does
+- [x] Track current local storage mode as plaintext JSON or encrypted vault.
+- [x] When mode is plaintext JSON, `saveData()` writes `data.json` as it does
   today.
-- [ ] When mode is encrypted vault, `saveData()` writes only `data.bin`.
-- [ ] Ensure debounced usage-count saves do not recreate plaintext `data.json`
+- [x] When mode is encrypted vault, `saveData()` writes only `data.bin`.
+- [x] Ensure debounced usage-count saves do not recreate plaintext `data.json`
   after migration.
-- [ ] Keep the local vault password in memory only for the current app session
+- [x] Keep the local vault password in memory only for the current app session
   unless an explicit remember-password option is added later.
-- [ ] Write encrypted saves to a temporary file first.
-- [ ] Verify or atomically replace the final `data.bin` where practical.
-- [ ] Avoid logging serialized app data, passwords, derived keys, nonces, or
+- [x] Write encrypted saves to a temporary file first.
+- [x] Verify or atomically replace the final `data.bin` where practical.
+- [x] Avoid logging serialized app data, passwords, derived keys, nonces, or
   ciphertext.
 
 ## Step 9 - 2FAS Import Integration
 
-- [ ] Keep 2FAS import parsing and decryption behavior separate from local
+- [x] Keep 2FAS import parsing and decryption behavior separate from local
   vault encryption.
-- [ ] Continue accepting unencrypted 2FAS JSON exports.
-- [ ] Continue accepting encrypted 2FAS exports through
+- [x] Continue accepting unencrypted 2FAS JSON exports.
+- [x] Continue accepting encrypted 2FAS exports through
   `TwoFasDecryptionService`.
-- [ ] After a successful import, merge data using the existing merge behavior.
-- [ ] If current storage mode is encrypted vault, save the merged app data only
+- [x] After a successful import, merge data using the existing merge behavior.
+- [x] If current storage mode is encrypted vault, save the merged app data only
   to `data.bin`.
-- [ ] If current storage mode is plaintext JSON, offer the same encrypt local
+- [x] If current storage mode is plaintext JSON, offer the same encrypt local
   data prompt after importing.
-- [ ] Do not store imported plaintext secrets in `data.json` when the local
+- [x] Do not store imported plaintext secrets in `data.json` when the local
   storage mode is encrypted vault.
 
 ## Step 10 - User Actions and Settings
 
-- [ ] Add a dashboard menu or settings action for `Encrypt Local Data` when
+- [x] Add a dashboard menu or settings action for `Encrypt Local Data` when
   plaintext storage is active.
-- [ ] Add `Change Vault Password` when encrypted storage is active.
-- [ ] For password changes, decrypt with the old password and re-encrypt the
+- [x] Add `Change Vault Password` when encrypted storage is active.
+- [x] For password changes, decrypt with the old password and re-encrypt the
   exact same app data JSON payload with the new password.
-- [ ] Consider `Disable Encryption` only with clear confirmation that plaintext
-  `data.json` will be written.
-- [ ] Update the data directory dialog or related help text to mention both
+- [x] Do not include `Disable Encryption` in the first release of this
+  feature.
+- [x] Update the data directory dialog or related help text to mention both
   `data.bin` and `data.json`.
 
 ## Step 11 - Repository and State Tests
 
-- [ ] Add tests proving `data.bin` is preferred over `data.json` when both
+- [x] Add tests proving `data.bin` is preferred over `data.json` when both
   exist.
-- [ ] Add tests proving no fallback to `data.json` occurs after a failed
+- [x] Add tests proving no fallback to `data.json` occurs after a failed
   `data.bin` decrypt.
-- [ ] Add tests proving decrypted `data.bin` app data parses identically to
+- [x] Add tests proving decrypted `data.bin` app data parses identically to
   `data.json`.
-- [ ] Add tests proving plaintext migration creates `data.bin`.
-- [ ] Add tests proving plaintext migration deletes or sanitizes `data.json`.
-- [ ] Add tests proving encrypted-mode saves do not recreate `data.json`.
-- [ ] Add tests proving imports save to the active storage mode.
-- [ ] Update existing `OtpState` test fakes for the new storage-mode behavior.
+- [x] Add tests proving plaintext migration creates `data.bin`.
+- [x] Add tests proving plaintext migration deletes or sanitizes `data.json`.
+- [x] Add tests proving encrypted-mode saves do not recreate `data.json`.
+- [x] Add tests proving imports save to the active storage mode.
+- [x] Update existing `OtpState` test fakes for the new storage-mode behavior.
 
 ## Step 12 - Documentation Updates
 
-- [ ] Update `README.md` storage-path documentation to describe `data.bin`.
-- [ ] Document that `data.bin` decrypts to the same app data JSON schema as
+- [x] Update `README.md` storage-path documentation to describe `data.bin`.
+- [x] Document that `data.bin` decrypts to the same app data JSON schema as
   `data.json`.
-- [ ] Document that `data.bin` is loaded before `data.json`.
-- [ ] Document that losing the local vault password makes encrypted local data
+- [x] Document that `data.bin` is loaded before `data.json`.
+- [x] Document that losing the local vault password makes encrypted local data
   unrecoverable unless the user has another backup.
-- [ ] Update troubleshooting text for wrong password, corrupted vault, and
+- [x] Update troubleshooting text for wrong password, corrupted vault, and
   plaintext migration failures.
 
 ## Step 13 - Test Pass
 
-- [ ] Run local vault encryption service tests:
+- [x] Run local vault encryption service tests:
   `F:\tools\flutter\bin\flutter.bat test test/services`
-- [ ] Run repository tests:
+- [x] Run repository tests:
   `F:\tools\flutter\bin\flutter.bat test test/data/repositories`
-- [ ] Run state tests:
+- [x] Run state tests:
   `F:\tools\flutter\bin\flutter.bat test test/presentation/state`
-- [ ] Run the full Flutter test suite:
+- [x] Run the full Flutter test suite:
   `F:\tools\flutter\bin\flutter.bat test`
-- [ ] Run static analysis:
+- [x] Run static analysis:
   `F:\tools\flutter\bin\flutter.bat analyze`
 
 ## Step 14 - Manual Verification
@@ -232,9 +232,9 @@ when present. If neither file exists, startup continues with empty app data.
 
 ## Open Questions
 
-- [ ] Should the app offer a remember-password option for the local vault, or
-  keep vault passwords memory-only for a stricter at-rest threat model?
-- [ ] Should password-strength guidance be advisory only, or should the app
-  enforce a minimum length?
-- [ ] Should `Disable Encryption` be included in the first release of this
-  feature, or deferred until encrypted storage is stable?
+- [x] Keep local vault passwords memory-only for the current app session. Do
+  not offer a remember-password option.
+- [x] Keep password-strength guidance advisory only. Do not enforce a minimum
+  length in the first release.
+- [x] Do not include `Disable Encryption` in the first release of this
+  feature.

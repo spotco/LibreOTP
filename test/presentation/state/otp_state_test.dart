@@ -17,8 +17,16 @@ class MockStorageRepository extends StorageRepository {
   List<Group> _importGroups = [];
   List<OtpService> _importServices = [];
   bool shouldThrowException = false;
+  LoadedAppData? storedLoadResult;
+  Exception? storedLoadException;
+  bool hasAnyData = true;
   late File _testFile;
   AppData? savedData;
+  AppData? encryptedSavedData;
+  AppData? migratedData;
+  String? encryptedSavePassword;
+  String? migratedPassword;
+  StorageDataSource? savedSource;
 
   MockStorageRepository() {
     final tempDir = Directory.systemTemp;
@@ -35,7 +43,42 @@ class MockStorageRepository extends StorageRepository {
   }
 
   @override
-  Future<void> saveData(AppData data) async {}
+  Future<LoadedAppData> loadStoredData({String? password}) async {
+    if (storedLoadException != null) {
+      throw storedLoadException!;
+    }
+    return storedLoadResult ??
+        LoadedAppData(
+          data: AppData(groups: _groups, services: _services),
+          source: StorageDataSource.plaintextJson,
+        );
+  }
+
+  @override
+  Future<void> saveData(
+    AppData data, {
+    StorageDataSource source = StorageDataSource.plaintextJson,
+    String? password,
+  }) async {
+    savedData = data;
+    savedSource = source;
+    encryptedSavePassword = password;
+  }
+
+  @override
+  Future<void> saveEncryptedData(AppData data, String password) async {
+    encryptedSavedData = data;
+    encryptedSavePassword = password;
+  }
+
+  @override
+  Future<void> migratePlaintextDataToEncryptedVault(
+    AppData data,
+    String password,
+  ) async {
+    migratedData = data;
+    migratedPassword = password;
+  }
 
   @override
   Future<AppData> importBackupFile(String filePath, {String? password}) async {
@@ -46,16 +89,24 @@ class MockStorageRepository extends StorageRepository {
   Future<File> getLocalFile() async => _testFile;
 
   @override
-  Future<bool> hasExistingData() async => _testFile.existsSync();
+  Future<bool> hasExistingData() async => hasAnyData;
 
   void setTestData(List<Group> groups, List<OtpService> services) {
     _groups = groups;
     _services = services;
+    storedLoadResult = LoadedAppData(
+      data: AppData(groups: groups, services: services),
+      source: StorageDataSource.plaintextJson,
+    );
   }
 
   void setImportData(List<Group> groups, List<OtpService> services) {
     _importGroups = groups;
     _importServices = services;
+  }
+
+  void setStoredLoadException(Exception exception) {
+    storedLoadException = exception;
   }
 }
 
@@ -111,6 +162,67 @@ void main() {
         expect(otpState, isA<OtpState>());
         expect(otpState.services, isA<List<OtpService>>());
         expect(otpState.groups, isA<List<Group>>());
+      });
+
+      test('should require local vault password when encrypted vault exists',
+          () async {
+        mockRepository.setStoredLoadException(
+          const StoragePasswordRequiredException(
+            StorageDataSource.encryptedVault,
+            'Password required for encrypted vault',
+          ),
+        );
+
+        await otpState.initializeData();
+
+        expect(otpState.requiresPassword, isTrue);
+        expect(otpState.requiresLocalVaultPassword, isTrue);
+        expect(otpState.requiresBackupPassword, isFalse);
+      });
+
+      test(
+          'should require backup password when startup data is an encrypted backup',
+          () async {
+        mockRepository.setStoredLoadException(
+          const StoragePasswordRequiredException(
+            StorageDataSource.encryptedBackupJson,
+            'Password required for encrypted backup',
+          ),
+        );
+
+        await otpState.initializeData();
+
+        expect(otpState.requiresPassword, isTrue);
+        expect(otpState.requiresLocalVaultPassword, isFalse);
+        expect(otpState.requiresBackupPassword, isTrue);
+      });
+
+      test('should offer encryption migration after plaintext startup',
+          () async {
+        mockRepository.storedLoadResult = LoadedAppData(
+          data: AppData(
+            groups: const [Group(id: 'group-id', name: 'Work')],
+            services: const [
+              OtpService(
+                id: 'service-id',
+                name: 'GitHub',
+                secret: 'SECRET1',
+                otp: OtpConfig(
+                  account: 'dev@example.com',
+                  issuer: 'GitHub',
+                ),
+                order: OrderInfo(position: 0),
+              ),
+            ],
+          ),
+          source: StorageDataSource.plaintextJson,
+        );
+
+        await otpState.initializeData();
+
+        expect(otpState.shouldPromptForEncryptionMigration, isTrue);
+        expect(otpState.canEncryptLocalData, isTrue);
+        expect(otpState.usesEncryptedLocalStorage, isFalse);
       });
     });
 
@@ -199,6 +311,123 @@ void main() {
         final groupedServices = otpState.groupedServices;
         expect(groupedServices['work']!.first.order.position, equals(0));
         expect(groupedServices['personal']!.first.order.position, equals(0));
+      });
+
+      test('should save imported data back to encrypted vault when active',
+          () async {
+        final existingService = OtpService(
+          id: 'existing-1',
+          name: 'Existing',
+          secret: 'SECRET1',
+          otp: const OtpConfig(account: 'existing@example.com', issuer: 'Test'),
+          order: const OrderInfo(position: 0),
+        );
+        final importedService = OtpService(
+          id: 'import-new',
+          name: 'Imported',
+          secret: 'SECRET2',
+          otp: const OtpConfig(account: 'import@example.com', issuer: 'Test'),
+          order: const OrderInfo(position: 0),
+        );
+
+        mockRepository.storedLoadResult = LoadedAppData(
+          data: AppData(groups: [], services: [existingService]),
+          source: StorageDataSource.encryptedVault,
+        );
+        mockRepository.setImportData([], [importedService]);
+
+        await otpState.initializeData();
+        await otpState.loadDataWithPassword('vault-password');
+        await otpState.importBackupFile('dummy.json');
+
+        expect(mockRepository.savedSource,
+            equals(StorageDataSource.encryptedVault));
+        expect(mockRepository.encryptedSavePassword, equals('vault-password'));
+        expect(otpState.usesEncryptedLocalStorage, isTrue);
+      });
+
+      test('should offer encryption migration after import in plaintext mode',
+          () async {
+        final importedService = OtpService(
+          id: 'import-new',
+          name: 'Imported',
+          secret: 'SECRET2',
+          otp: const OtpConfig(account: 'import@example.com', issuer: 'Test'),
+          order: const OrderInfo(position: 0),
+        );
+
+        mockRepository.storedLoadResult = LoadedAppData(
+          data: AppData(groups: [], services: []),
+          source: StorageDataSource.none,
+        );
+        mockRepository.hasAnyData = false;
+        mockRepository.setImportData([], [importedService]);
+
+        await otpState.initializeData();
+        final importResult = await otpState.importBackupFile('dummy.json');
+
+        expect(importResult, isNotNull);
+        expect(mockRepository.savedSource,
+            equals(StorageDataSource.plaintextJson));
+        expect(otpState.shouldPromptForEncryptionMigration, isTrue);
+        expect(otpState.canEncryptLocalData, isTrue);
+      });
+
+      test(
+          'should migrate plaintext data to encrypted vault and stop prompting',
+          () async {
+        mockRepository.storedLoadResult = LoadedAppData(
+          data: AppData(
+            groups: const [Group(id: 'group-id', name: 'Work')],
+            services: const [
+              OtpService(
+                id: 'service-id',
+                name: 'GitHub',
+                secret: 'SECRET1',
+                otp: OtpConfig(
+                  account: 'dev@example.com',
+                  issuer: 'GitHub',
+                ),
+                order: OrderInfo(position: 0),
+              ),
+            ],
+          ),
+          source: StorageDataSource.plaintextJson,
+        );
+
+        await otpState.initializeData();
+        await otpState.migratePlaintextDataToEncryptedVault('vault-password');
+
+        expect(mockRepository.migratedData, isNotNull);
+        expect(mockRepository.migratedPassword, equals('vault-password'));
+        expect(otpState.shouldPromptForEncryptionMigration, isFalse);
+        expect(otpState.usesEncryptedLocalStorage, isTrue);
+        expect(otpState.canEncryptLocalData, isFalse);
+      });
+
+      test(
+          'should change local vault password when encrypted storage is active',
+          () async {
+        final existingService = OtpService(
+          id: 'existing-1',
+          name: 'Existing',
+          secret: 'SECRET1',
+          otp: const OtpConfig(account: 'existing@example.com', issuer: 'Test'),
+          order: const OrderInfo(position: 0),
+        );
+
+        mockRepository.storedLoadResult = LoadedAppData(
+          data: AppData(groups: [], services: [existingService]),
+          source: StorageDataSource.encryptedVault,
+        );
+
+        await otpState.initializeData();
+        await otpState.loadDataWithPassword('old-password');
+        await otpState.changeLocalVaultPassword('new-password');
+
+        expect(mockRepository.savedSource,
+            equals(StorageDataSource.encryptedVault));
+        expect(mockRepository.encryptedSavePassword, equals('new-password'));
       });
     });
 
@@ -495,6 +724,40 @@ void main() {
         otpState.generateOtp('Most Used', 0, context);
         await tester.pump();
         expect(otpState.services.first.usageCount, equals(3));
+
+        disposeState();
+      });
+
+      testWidgets(
+          'should save usage updates to encrypted vault after migration',
+          (WidgetTester tester) async {
+        final testService = OtpService(
+          id: 'service-1',
+          name: 'Test Service',
+          secret: 'JBSWY3DPEHPK3PXP',
+          otp: const OtpConfig(account: 'test@example.com', issuer: 'Test'),
+          order: const OrderInfo(position: 0),
+          usageCount: 0,
+        );
+
+        mockRepository.storedLoadResult = LoadedAppData(
+          data: AppData(groups: [], services: [testService]),
+          source: StorageDataSource.plaintextJson,
+        );
+        await otpState.initializeData();
+        await otpState.migratePlaintextDataToEncryptedVault('vault-password');
+
+        await tester.pumpWidget(MaterialApp(home: Scaffold(body: Container())));
+        final context = tester.element(find.byType(Container));
+
+        otpState.setDisplayMode(DisplayMode.usageBased);
+        otpState.generateOtp('Most Used', 0, context);
+        await tester.pump(const Duration(seconds: 2));
+
+        expect(mockRepository.savedData, isNotNull);
+        expect(mockRepository.savedSource,
+            equals(StorageDataSource.encryptedVault));
+        expect(mockRepository.encryptedSavePassword, equals('vault-password'));
 
         disposeState();
       });

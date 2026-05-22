@@ -24,6 +24,7 @@ class _DashboardPageState extends State<DashboardPage> {
   final Set<String> _collapsedGroupIds = {};
   int? _sortColumnIndex;
   bool _sortAscending = true;
+  bool _migrationPromptHandled = false;
 
   @override
   void initState() {
@@ -41,6 +42,23 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  void _checkForEncryptionMigrationPrompt() {
+    final otpState = Provider.of<OtpState>(context, listen: false);
+    if (!otpState.shouldPromptForEncryptionMigration ||
+        otpState.requiresPassword ||
+        otpState.isLoading ||
+        _migrationPromptHandled) {
+      return;
+    }
+
+    _migrationPromptHandled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _showEncryptionMigrationPrompt();
+      }
+    });
+  }
+
   void _showPasswordDialog() async {
     final otpState = Provider.of<OtpState>(context, listen: false);
 
@@ -48,6 +66,9 @@ class _DashboardPageState extends State<DashboardPage> {
       context: context,
       barrierDismissible: false,
       builder: (context) => PasswordDialog(
+        mode: otpState.requiresLocalVaultPassword
+            ? PasswordDialogMode.unlockVault
+            : PasswordDialogMode.decryptBackup,
         errorMessage: otpState.encryptionError,
       ),
     );
@@ -57,6 +78,147 @@ class _DashboardPageState extends State<DashboardPage> {
       if (otpState.encryptionError != null && mounted) {
         _showPasswordDialog(); // Show dialog again with error
       }
+    }
+  }
+
+  Future<void> _showEncryptionMigrationPrompt() async {
+    final otpState = Provider.of<OtpState>(context, listen: false);
+
+    final shouldEncrypt = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Encrypt Local Data'),
+        content: const Text(
+          'LibreOTP loaded plaintext local data from data.json. You can migrate it into an encrypted local vault and remove the plaintext file.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Not Now'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Encrypt'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    if (shouldEncrypt != true) {
+      otpState.dismissEncryptionMigrationPrompt();
+      return;
+    }
+
+    final password = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const PasswordDialog(
+        mode: PasswordDialogMode.createVaultPassword,
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    if (password == null) {
+      otpState.dismissEncryptionMigrationPrompt();
+      return;
+    }
+
+    try {
+      await otpState.migratePlaintextDataToEncryptedVault(password);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Local data encrypted and migrated to data.bin'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Encryption Failed'),
+          content: Text(
+            'LibreOTP could not migrate the local data into the encrypted vault.\n\n$e',
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      _migrationPromptHandled = false;
+    }
+  }
+
+  Future<void> _showChangeVaultPasswordDialog() async {
+    final otpState = Provider.of<OtpState>(context, listen: false);
+    final password = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const PasswordDialog(
+        mode: PasswordDialogMode.changeVaultPassword,
+      ),
+    );
+
+    if (!mounted || password == null) {
+      return;
+    }
+
+    try {
+      await otpState.changeLocalVaultPassword(password);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Vault password updated'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Password Change Failed'),
+          content: Text(
+            'LibreOTP could not update the vault password.\n\n$e',
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleStorageAction(_StorageAction action) async {
+    switch (action) {
+      case _StorageAction.encryptLocalData:
+        await _showEncryptionMigrationPrompt();
+        break;
+      case _StorageAction.changeVaultPassword:
+        await _showChangeVaultPasswordDialog();
+        break;
     }
   }
 
@@ -190,6 +352,7 @@ class _DashboardPageState extends State<DashboardPage> {
       context: context,
       barrierDismissible: false,
       builder: (context) => PasswordDialog(
+        mode: PasswordDialogMode.decryptBackup,
         errorMessage: otpState.encryptionError,
       ),
     );
@@ -341,6 +504,50 @@ class _DashboardPageState extends State<DashboardPage> {
                 tooltip: 'Show Data Directory',
                 onPressed: () => _showDataDirectory(context),
               ),
+              Consumer<OtpState>(
+                builder: (context, otpState, child) {
+                  final items = <PopupMenuEntry<_StorageAction>>[];
+                  if (otpState.canEncryptLocalData) {
+                    items.add(
+                      const PopupMenuItem(
+                        value: _StorageAction.encryptLocalData,
+                        child: Row(
+                          children: [
+                            Icon(Icons.lock),
+                            SizedBox(width: 8),
+                            Text('Encrypt Local Data'),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+                  if (otpState.usesEncryptedLocalStorage) {
+                    items.add(
+                      const PopupMenuItem(
+                        value: _StorageAction.changeVaultPassword,
+                        child: Row(
+                          children: [
+                            Icon(Icons.password),
+                            SizedBox(width: 8),
+                            Text('Change Vault Password'),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+                  if (items.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+
+                  return PopupMenuButton<_StorageAction>(
+                    icon: Icon(Icons.lock_outline,
+                        color: Theme.of(context).colorScheme.onPrimary),
+                    tooltip: 'Storage',
+                    onSelected: _handleStorageAction,
+                    itemBuilder: (_) => items,
+                  );
+                },
+              ),
               PopupMenuButton<ThemeMode>(
                 icon: Icon(Icons.brightness_medium,
                     color: Theme.of(context).colorScheme.onPrimary),
@@ -392,6 +599,8 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
       body: Consumer<OtpState>(
         builder: (context, otpState, child) {
+          _checkForEncryptionMigrationPrompt();
+
           if (otpState.isLoading) {
             return Center(
               child: Column(
@@ -412,6 +621,7 @@ class _DashboardPageState extends State<DashboardPage> {
           }
 
           if (otpState.requiresPassword) {
+            final isLocalVault = otpState.requiresLocalVaultPassword;
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -420,13 +630,17 @@ class _DashboardPageState extends State<DashboardPage> {
                       size: 64,
                       color: Theme.of(context).colorScheme.onSurfaceVariant),
                   const SizedBox(height: 16),
-                  const Text(
-                    'Encrypted Backup Detected',
+                  Text(
+                    isLocalVault
+                        ? 'Encrypted Vault Detected'
+                        : 'Encrypted Backup Detected',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Please provide the password to decrypt your backup.',
+                    isLocalVault
+                        ? 'Please provide the password to unlock your local vault.'
+                        : 'Please provide the password to decrypt your backup.',
                     style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
@@ -442,6 +656,7 @@ class _DashboardPageState extends State<DashboardPage> {
           }
 
           if (otpState.encryptionError != null) {
+            final isLocalVault = otpState.requiresLocalVaultPassword;
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -449,8 +664,10 @@ class _DashboardPageState extends State<DashboardPage> {
                   Icon(Icons.error,
                       size: 64, color: Theme.of(context).colorScheme.error),
                   const SizedBox(height: 16),
-                  const Text(
-                    'Failed to Load Backup',
+                  Text(
+                    isLocalVault
+                        ? 'Failed to Unlock Vault'
+                        : 'Failed to Load Backup',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
@@ -584,4 +801,9 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
     );
   }
+}
+
+enum _StorageAction {
+  encryptLocalData,
+  changeVaultPassword,
 }

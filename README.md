@@ -57,11 +57,37 @@ The app will appear in your applications menu. Dependencies are automatically in
 
 2. **Import into LibreOTP**: Launch the app and use the import button to select your `data.json` file
    - The app will automatically detect if your export is encrypted
-   - Your data is stored securely on your device
+   - Imported data is stored locally on your device
 
 3. **Start generating codes**: Click any service to copy its OTP code to your clipboard
 
 4. **Enjoy!** And don't forget to :star: Star the repository to encourage further updates. 
+
+## Local Storage
+
+LibreOTP stores its local app data in the platform application support directory.
+That directory can contain two local storage files:
+
+- `data.json`: plaintext local app data
+- `data.bin`: encrypted local vault
+
+When `data.bin` exists, LibreOTP loads it first and does not fall back to
+`data.json` if vault unlock fails. When `data.bin` is absent, LibreOTP falls
+back to `data.json`.
+
+The decrypted payload inside `data.bin` is the same JSON schema as `data.json`:
+
+```json
+{
+  "services": [],
+  "groups": []
+}
+```
+
+LibreOTP can migrate plaintext local data from `data.json` into an encrypted
+local vault in `data.bin`. The local vault password is requested when creating
+the vault and each time the vault is unlocked after restart. LibreOTP does not
+offer a remember-password option for the local vault.
 
 ## Troubleshooting
 
@@ -79,14 +105,23 @@ The app will appear in your applications menu. Dependencies are automatically in
 - Click "Enter Password" and provide the password you set when creating the export
 - The password will be securely stored for future app launches
 
+### "Password required for encrypted vault" error
+- LibreOTP found a local `data.bin` vault and needs its password before it can load services
+- The local vault password is not remembered between app launches
+- If you enter the wrong password, LibreOTP will not fall back to plaintext `data.json`
+
 ### Wrong password or decryption errors
-- Verify you're using the correct password for your 2FAS export
-- If you've forgotten the password, you'll need to create a new export from 2FAS
-- Click "Use Different Password" to clear any stored password and try again
+- Verify whether you are unlocking a 2FAS export or a local LibreOTP vault
+- For 2FAS exports, verify you're using the correct export password
+- For local `data.bin` vaults, verify you're using the password chosen when encryption was enabled
+- If you've forgotten the local vault password, LibreOTP cannot recover the encrypted local data
+- If the error mentions an invalid or corrupted encrypted vault, restore from another backup or migrate again from plaintext data if it still exists
+- Click "Use Different Password" to clear any stored 2FAS backup password and try again
 
 ### Empty app or no services showing
-- Check that your `data.json` file is in the correct location (see file paths above)
-- Verify the file contains valid 2FAS export data
+- Check that the app support directory contains the expected local files
+- If both `data.bin` and `data.json` exist, LibreOTP will use `data.bin`
+- Verify `data.json` contains valid local app data or a valid 2FAS export
 - For encrypted files, ensure you've entered the correct password
 
 ## Limitations
@@ -120,7 +155,9 @@ The Flutter docs are great and along with IntelliJ's starter project meant I got
 ## Features
 
 - ✅ Support for both encrypted and unencrypted 2FAS exports
-- ✅ Secure password storage with automatic decryption on subsequent launches
+- ✅ Encrypted local vault storage in `data.bin`
+- ✅ Shared local app-data schema across plaintext `data.json` and encrypted `data.bin`
+- ✅ Secure password storage for encrypted 2FAS exports
 - ✅ Cross-platform support (Windows, macOS, Linux)
 - ✅ 2FAS group support and search functionality
 - ✅ TOTP code generation with copy-to-clipboard

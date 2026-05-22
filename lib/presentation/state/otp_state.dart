@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../config/app_config.dart';
@@ -9,10 +8,15 @@ import '../../data/models/group.dart';
 import '../../data/repositories/storage_repository.dart';
 import '../../domain/services/otp_service.dart';
 import '../../utils/clipboard_utils.dart';
-import '../../services/twofas_decryption_service.dart';
 import '../../services/secure_storage_service.dart';
 import '../../services/twofas_icon_service.dart';
 import 'otp_display_state.dart';
+
+enum PasswordPromptReason {
+  none,
+  encryptedVault,
+  encryptedBackup,
+}
 
 class OtpState extends ChangeNotifier {
   static const String defaultGroupId = 'Ungrouped';
@@ -41,6 +45,10 @@ class OtpState extends ChangeNotifier {
   String? _selectedFilePath;
   DisplayMode _displayMode = DisplayMode.grouped;
   bool _dataInitialized = false;
+  PasswordPromptReason _passwordPromptReason = PasswordPromptReason.none;
+  bool _shouldPromptForEncryptionMigration = false;
+  StorageDataSource _activeStorageSource = StorageDataSource.none;
+  String? _localVaultPassword;
 
   // Helper method to yield control to allow UI updates
   Future<void> _yieldToUI([int milliseconds = 16]) async {
@@ -76,10 +84,21 @@ class OtpState extends ChangeNotifier {
   String get dataDirectory => _dataDirectory;
   bool get isLoading => _isLoading;
   bool get requiresPassword => _requiresPassword;
+  bool get requiresLocalVaultPassword =>
+      _passwordPromptReason == PasswordPromptReason.encryptedVault;
+  bool get requiresBackupPassword =>
+      _passwordPromptReason == PasswordPromptReason.encryptedBackup;
   String? get encryptionError => _encryptionError;
   bool get hasExistingData => _hasExistingData;
   String? get selectedFilePath => _selectedFilePath;
   DisplayMode get displayMode => _displayMode;
+  bool get shouldPromptForEncryptionMigration =>
+      _shouldPromptForEncryptionMigration;
+  bool get usesEncryptedLocalStorage =>
+      _activeStorageSource == StorageDataSource.encryptedVault;
+  bool get canEncryptLocalData =>
+      !usesEncryptedLocalStorage &&
+      (_services.isNotEmpty || _groups.isNotEmpty);
 
   OtpDisplayState getOtpDisplayState(String serviceKey) {
     return _otpDisplayStates[serviceKey] ?? OtpDisplayState.empty;
@@ -118,9 +137,7 @@ class OtpState extends ChangeNotifier {
     // Schedule a new save after 2 seconds of inactivity
     _debouncedSaveTimer = Timer(const Duration(seconds: 2), () async {
       try {
-        await _storageRepository.saveData(
-          AppData(services: _services, groups: _groups),
-        );
+        await _persistCurrentData();
         debugPrint('Usage data saved successfully');
       } catch (e) {
         debugPrint('Error saving usage data: $e');
@@ -144,6 +161,7 @@ class OtpState extends ChangeNotifier {
     _isLoading = true;
     _requiresPassword = false;
     _encryptionError = null;
+    _passwordPromptReason = PasswordPromptReason.none;
     if (!_disposed) {
       notifyListeners();
     }
@@ -174,6 +192,7 @@ class OtpState extends ChangeNotifier {
     _isLoading = true;
     _requiresPassword = false;
     _encryptionError = null;
+    _passwordPromptReason = PasswordPromptReason.none;
     if (!_disposed) {
       notifyListeners();
     }
@@ -196,72 +215,37 @@ class OtpState extends ChangeNotifier {
 
       // Yield after file system access to keep UI responsive
       if (withUIYields) await _yieldToUI(16);
+      final result = await _storageRepository.loadStoredData();
 
-      if (await file.exists()) {
-        final contents = await file.readAsString();
+      if (withUIYields) await _yieldToUI(24);
 
-        // Yield after file read to keep UI responsive
-        if (withUIYields) await _yieldToUI(24);
-
-        final jsonData = jsonDecode(contents) as Map<String, dynamic>;
-
-        // Yield after JSON parsing to keep UI responsive
-        if (withUIYields) await _yieldToUI(16);
-
-        if (TwoFasDecryptionService.isEncrypted(jsonData)) {
-          // Try to load with stored password first
-          try {
-            final data = await _storageRepository.loadData();
-
-            // Yield after secure storage access to keep UI responsive
-            if (withUIYields) await _yieldToUI(32);
-
-            _services = data.services;
-            _groups = data.groups;
-
-            // Yield before data processing to keep UI responsive
-            if (withUIYields) await _yieldToUI(16);
-
-            _groupedServices = _groupServicesByGroup();
-            _isLoading = false;
-            if (!_disposed) {
-              notifyListeners();
-            }
-
-            // Preload icons for imported services asynchronously
-            _preloadIconsForServices();
-
-            return;
-          } catch (e) {
-            // If stored password failed, require manual password entry
-            if (e.toString().contains('Password required')) {
-              _requiresPassword = true;
-              _isLoading = false;
-              if (!_disposed) {
-                notifyListeners();
-              }
-              return;
-            } else {
-              // Other errors (like wrong stored password) should be handled
-              _encryptionError = 'Failed to decrypt backup: ${e.toString()}';
-              _requiresPassword = true;
-              _isLoading = false;
-              if (!_disposed) {
-                notifyListeners();
-              }
-              return;
-            }
-          }
-        }
-      }
-
-      final data = await _storageRepository.loadData();
-      _services = data.services;
-      _groups = data.groups;
+      _applyLoadedData(result);
       _groupedServices = _groupServicesByGroup();
 
       // Preload icons for imported services asynchronously
       _preloadIconsForServices();
+    } on StoragePasswordRequiredException catch (e) {
+      _requiresPassword = true;
+      _passwordPromptReason = e.source == StorageDataSource.encryptedVault
+          ? PasswordPromptReason.encryptedVault
+          : PasswordPromptReason.encryptedBackup;
+      _isLoading = false;
+      if (!_disposed) {
+        notifyListeners();
+      }
+      return;
+    } on StorageLoadException catch (e) {
+      _requiresPassword = true;
+      _passwordPromptReason = e.source == StorageDataSource.encryptedVault
+          ? PasswordPromptReason.encryptedVault
+          : PasswordPromptReason.encryptedBackup;
+      _encryptionError = e.toString();
+      debugPrint(_encryptionError);
+      _isLoading = false;
+      if (!_disposed) {
+        notifyListeners();
+      }
+      return;
     } catch (e) {
       _encryptionError = 'Error loading data: $e';
       debugPrint(_encryptionError);
@@ -280,14 +264,27 @@ class OtpState extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final data = await _storageRepository.loadData(password: password);
-      _services = data.services;
-      _groups = data.groups;
+      final result =
+          await _storageRepository.loadStoredData(password: password);
+      _applyLoadedData(result, password: password);
       _groupedServices = _groupServicesByGroup();
       _requiresPassword = false;
+      _passwordPromptReason = PasswordPromptReason.none;
 
       // Preload icons for imported services asynchronously
       _preloadIconsForServices();
+    } on StoragePasswordRequiredException catch (e) {
+      _requiresPassword = true;
+      _passwordPromptReason = e.source == StorageDataSource.encryptedVault
+          ? PasswordPromptReason.encryptedVault
+          : PasswordPromptReason.encryptedBackup;
+    } on StorageLoadException catch (e) {
+      _encryptionError = e.toString();
+      _requiresPassword = true;
+      _passwordPromptReason = e.source == StorageDataSource.encryptedVault
+          ? PasswordPromptReason.encryptedVault
+          : PasswordPromptReason.encryptedBackup;
+      debugPrint('Error loading encrypted data: $e');
     } catch (e) {
       _encryptionError = e.toString();
       debugPrint('Error loading encrypted data: $e');
@@ -301,11 +298,20 @@ class OtpState extends ChangeNotifier {
     initializeData();
   }
 
+  void dismissEncryptionMigrationPrompt() {
+    if (!_shouldPromptForEncryptionMigration) {
+      return;
+    }
+    _shouldPromptForEncryptionMigration = false;
+    notifyListeners();
+  }
+
   Future<void> clearStoredPassword() async {
     try {
       await SecureStorageService.clearStoredPassword();
       _requiresPassword = true;
       _encryptionError = null;
+      _passwordPromptReason = PasswordPromptReason.encryptedBackup;
       notifyListeners();
     } catch (e) {
       debugPrint('Error clearing stored password: $e');
@@ -655,13 +661,13 @@ class OtpState extends ChangeNotifier {
       final data = await _storageRepository.importBackupFile(filePath,
           password: password);
       final importResult = _mergeImportedData(data);
+      _setStorageModeAfterImport();
       _groupedServices = _groupServicesByGroup();
       _hasExistingData = true;
       _requiresPassword = false;
+      _passwordPromptReason = PasswordPromptReason.none;
       _isLoading = false;
-      await _storageRepository.saveData(
-        AppData(services: _services, groups: _groups),
-      );
+      await _persistCurrentData();
       notifyListeners();
 
       // Preload icons for imported services asynchronously
@@ -671,6 +677,7 @@ class OtpState extends ChangeNotifier {
     } catch (e) {
       if (e.toString().contains('Password required')) {
         _requiresPassword = true;
+        _passwordPromptReason = PasswordPromptReason.encryptedBackup;
         _encryptionError = null;
       } else {
         _encryptionError = 'Failed to import backup: $e';
@@ -696,6 +703,34 @@ class OtpState extends ChangeNotifier {
       String password) async {
     if (_selectedFilePath == null) return null;
     return await importBackupFile(_selectedFilePath!, password: password);
+  }
+
+  Future<void> migratePlaintextDataToEncryptedVault(String password) async {
+    final data = AppData(services: _services, groups: _groups);
+    await _storageRepository.migratePlaintextDataToEncryptedVault(
+      data,
+      password,
+    );
+    _activeStorageSource = StorageDataSource.encryptedVault;
+    _localVaultPassword = password;
+    _shouldPromptForEncryptionMigration = false;
+    _hasExistingData = true;
+    notifyListeners();
+  }
+
+  Future<void> changeLocalVaultPassword(String password) async {
+    if (!usesEncryptedLocalStorage) {
+      throw StateError('Encrypted local storage is not active');
+    }
+
+    final data = AppData(services: _services, groups: _groups);
+    await _storageRepository.saveData(
+      data,
+      source: StorageDataSource.encryptedVault,
+      password: password,
+    );
+    _localVaultPassword = password;
+    notifyListeners();
   }
 
   ImportBackupResult _mergeImportedData(AppData importedData) {
@@ -837,6 +872,38 @@ class OtpState extends ChangeNotifier {
 
     // Preload icons in the background (non-blocking)
     TwoFasIconService.preloadIconsForServices(serviceNames, issuers);
+  }
+
+  void _applyLoadedData(LoadedAppData result, {String? password}) {
+    _services = result.data.services;
+    _groups = result.data.groups;
+    _activeStorageSource = result.source;
+    _localVaultPassword =
+        result.source == StorageDataSource.encryptedVault ? password : null;
+    _shouldPromptForEncryptionMigration =
+        result.source == StorageDataSource.plaintextJson &&
+            (_services.isNotEmpty || _groups.isNotEmpty);
+  }
+
+  void _setStorageModeAfterImport() {
+    if (_activeStorageSource == StorageDataSource.encryptedVault) {
+      _shouldPromptForEncryptionMigration = false;
+      return;
+    }
+
+    _activeStorageSource = StorageDataSource.plaintextJson;
+    _localVaultPassword = null;
+    _shouldPromptForEncryptionMigration =
+        _services.isNotEmpty || _groups.isNotEmpty;
+  }
+
+  Future<void> _persistCurrentData() async {
+    final data = AppData(services: _services, groups: _groups);
+    await _storageRepository.saveData(
+      data,
+      source: _activeStorageSource,
+      password: _localVaultPassword,
+    );
   }
 }
 

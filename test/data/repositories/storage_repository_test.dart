@@ -1,13 +1,25 @@
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:libreotp/data/models/group.dart';
 import 'package:libreotp/data/models/otp_service.dart';
 import 'package:libreotp/data/repositories/storage_repository.dart';
+import 'package:libreotp/services/local_vault_encryption_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('StorageRepository', () {
-    setUp(() {});
+    late Directory tempDir;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('libreotp_storage_test_');
+    });
+
+    tearDown(() async {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
 
     group('Data models validation', () {
       test('should create valid Group from JSON', () {
@@ -178,6 +190,358 @@ void main() {
         // Test static properties without platform dependencies
         expect(StorageRepository, isA<Type>());
         // We can't test file paths in unit tests without mocking platform channels
+      });
+
+      test('should serialize and parse plaintext app data consistently', () {
+        final repository = StorageRepository();
+        final data = AppData(
+          services: const [
+            OtpService(
+              id: 'service-id',
+              name: 'GitHub',
+              secret: 'JBSWY3DPEHPK3PXP',
+              otp: OtpConfig(
+                account: 'dev@example.com',
+                issuer: 'GitHub',
+              ),
+              order: OrderInfo(position: 3),
+              groupId: 'group-id',
+            ),
+          ],
+          groups: const [
+            Group(id: 'group-id', name: 'Work'),
+          ],
+        );
+
+        final jsonString = repository.serializePlaintextAppData(data);
+        final decoded = repository.decodeJsonObject(jsonString);
+        final parsed = repository.parsePlaintextAppData(jsonString);
+
+        expect(decoded['services'], isA<List<dynamic>>());
+        expect(decoded['groups'], isA<List<dynamic>>());
+        expect(parsed.services, hasLength(1));
+        expect(parsed.groups, hasLength(1));
+        expect(parsed.services.first.id, equals('service-id'));
+        expect(parsed.services.first.secret, equals('JBSWY3DPEHPK3PXP'));
+        expect(parsed.groups.first.id, equals('group-id'));
+        expect(parsed.groups.first.name, equals('Work'));
+      });
+
+      test('app data json string should match app data json map', () {
+        final data = AppData(
+          services: const [
+            OtpService(
+              id: 'service-id',
+              name: 'Service Name',
+              secret: 'SECRET123',
+              otp: OtpConfig(
+                account: 'user@example.com',
+                issuer: 'Example Inc',
+              ),
+              order: OrderInfo(position: 1),
+            ),
+          ],
+          groups: const [
+            Group(id: 'group-id', name: 'Example Group'),
+          ],
+        );
+
+        final parsed = AppData.fromJsonString(data.toJsonString());
+
+        expect(parsed.toJson(), equals(data.toJson()));
+      });
+
+      test('should prefer data.bin over data.json when both exist', () async {
+        final repository = StorageRepository(localPathOverride: tempDir.path);
+        final plaintextData = AppData(
+          services: const [
+            OtpService(
+              id: 'plaintext-service',
+              name: 'Plaintext',
+              secret: 'PLAINTEXTSECRET',
+              otp: OtpConfig(account: 'plain@example.com', issuer: 'Plain'),
+              order: OrderInfo(position: 0),
+            ),
+          ],
+          groups: const [
+            Group(id: 'plain-group', name: 'Plain'),
+          ],
+        );
+        final encryptedData = AppData(
+          services: const [
+            OtpService(
+              id: 'vault-service',
+              name: 'Vault',
+              secret: 'VAULTSECRET',
+              otp: OtpConfig(account: 'vault@example.com', issuer: 'Vault'),
+              order: OrderInfo(position: 0),
+            ),
+          ],
+          groups: const [
+            Group(id: 'vault-group', name: 'Vault'),
+          ],
+        );
+
+        await repository.writeAppDataJson(plaintextData);
+        final encryptedFile = await repository.getEncryptedLocalFile();
+        final encryptedBytes = await LocalVaultEncryptionService.encrypt(
+          encryptedData.toJsonString(),
+          'vault-password',
+          iterations: 1000,
+        );
+        await encryptedFile.writeAsBytes(encryptedBytes);
+
+        final result =
+            await repository.loadStoredData(password: 'vault-password');
+
+        expect(result.source, equals(StorageDataSource.encryptedVault));
+        expect(result.data.services.single.id, equals('vault-service'));
+        expect(result.data.groups.single.id, equals('vault-group'));
+      });
+
+      test('should require encrypted vault password before reading data.json',
+          () async {
+        final repository = StorageRepository(localPathOverride: tempDir.path);
+        final plaintextData = AppData(
+          services: const [
+            OtpService(
+              id: 'plaintext-service',
+              name: 'Plaintext',
+              secret: 'PLAINTEXTSECRET',
+              otp: OtpConfig(account: 'plain@example.com', issuer: 'Plain'),
+              order: OrderInfo(position: 0),
+            ),
+          ],
+          groups: const [],
+        );
+
+        await repository.writeAppDataJson(plaintextData);
+        final encryptedFile = await repository.getEncryptedLocalFile();
+        final encryptedBytes = await LocalVaultEncryptionService.encrypt(
+          plaintextData.toJsonString(),
+          'vault-password',
+          iterations: 1000,
+        );
+        await encryptedFile.writeAsBytes(encryptedBytes);
+
+        expect(
+          () => repository.loadStoredData(),
+          throwsA(
+            isA<StoragePasswordRequiredException>().having(
+              (error) => error.source,
+              'source',
+              StorageDataSource.encryptedVault,
+            ),
+          ),
+        );
+      });
+
+      test(
+          'should not fall back to data.json after encrypted vault decrypt fails',
+          () async {
+        final repository = StorageRepository(localPathOverride: tempDir.path);
+        final plaintextData = AppData(
+          services: const [
+            OtpService(
+              id: 'plaintext-service',
+              name: 'Plaintext',
+              secret: 'PLAINTEXTSECRET',
+              otp: OtpConfig(account: 'plain@example.com', issuer: 'Plain'),
+              order: OrderInfo(position: 0),
+            ),
+          ],
+          groups: const [
+            Group(id: 'plain-group', name: 'Plain'),
+          ],
+        );
+        final encryptedData = AppData(
+          services: const [
+            OtpService(
+              id: 'vault-service',
+              name: 'Vault',
+              secret: 'VAULTSECRET',
+              otp: OtpConfig(account: 'vault@example.com', issuer: 'Vault'),
+              order: OrderInfo(position: 0),
+            ),
+          ],
+          groups: const [
+            Group(id: 'vault-group', name: 'Vault'),
+          ],
+        );
+
+        await repository.writeAppDataJson(plaintextData);
+        final encryptedFile = await repository.getEncryptedLocalFile();
+        final encryptedBytes = await LocalVaultEncryptionService.encrypt(
+          encryptedData.toJsonString(),
+          'vault-password',
+          iterations: 1000,
+        );
+        await encryptedFile.writeAsBytes(encryptedBytes);
+
+        expect(
+          () => repository.loadStoredData(password: 'wrong-password'),
+          throwsA(
+            isA<StorageLoadException>()
+                .having(
+                  (error) => error.source,
+                  'source',
+                  StorageDataSource.encryptedVault,
+                )
+                .having(
+                  (error) => error.message,
+                  'message',
+                  contains('Failed to unlock encrypted vault'),
+                ),
+          ),
+        );
+      });
+
+      test(
+          'should parse decrypted data.bin with the same app-data contract as data.json',
+          () async {
+        final repository = StorageRepository(localPathOverride: tempDir.path);
+        final data = AppData(
+          services: const [
+            OtpService(
+              id: 'service-id',
+              name: 'GitHub',
+              secret: 'JBSWY3DPEHPK3PXP',
+              otp: OtpConfig(
+                account: 'dev@example.com',
+                issuer: 'GitHub',
+              ),
+              order: OrderInfo(position: 3),
+              groupId: 'group-id',
+            ),
+          ],
+          groups: const [
+            Group(id: 'group-id', name: 'Work'),
+          ],
+        );
+
+        await repository.writeAppDataJson(data);
+        await repository.saveEncryptedData(data, 'vault-password');
+
+        final plaintextJson = await repository.readAppDataJson();
+        final encryptedBytes = await repository.readEncryptedAppData();
+        final decryptedJson = await LocalVaultEncryptionService.decrypt(
+          encryptedBytes,
+          'vault-password',
+        );
+
+        expect(decryptedJson, equals(plaintextJson));
+        expect(
+          repository.parsePlaintextAppData(decryptedJson).toJson(),
+          equals(AppData.fromJsonString(plaintextJson).toJson()),
+        );
+      });
+
+      test('should migrate plaintext data into encrypted vault and delete json',
+          () async {
+        final repository = StorageRepository(localPathOverride: tempDir.path);
+        final plaintextData = AppData(
+          services: const [
+            OtpService(
+              id: 'plaintext-service',
+              name: 'Plaintext',
+              secret: 'PLAINTEXTSECRET',
+              otp: OtpConfig(account: 'plain@example.com', issuer: 'Plain'),
+              order: OrderInfo(position: 0),
+            ),
+          ],
+          groups: const [
+            Group(id: 'plain-group', name: 'Plain'),
+          ],
+        );
+
+        await repository.writeAppDataJson(plaintextData);
+        await repository.migratePlaintextDataToEncryptedVault(
+          plaintextData,
+          'vault-password',
+        );
+
+        final plaintextFile = await repository.getLocalFile();
+        final encryptedFile = await repository.getEncryptedLocalFile();
+        final loaded =
+            await repository.loadStoredData(password: 'vault-password');
+
+        expect(await plaintextFile.exists(), isFalse);
+        expect(await encryptedFile.exists(), isTrue);
+        expect(loaded.source, equals(StorageDataSource.encryptedVault));
+        expect(loaded.data.toJson(), equals(plaintextData.toJson()));
+      });
+
+      test('should save plaintext mode to data.json', () async {
+        final repository = StorageRepository(localPathOverride: tempDir.path);
+        final data = AppData(
+          services: const [
+            OtpService(
+              id: 'service-id',
+              name: 'Plaintext',
+              secret: 'PLAINTEXTSECRET',
+              otp: OtpConfig(account: 'plain@example.com', issuer: 'Plain'),
+              order: OrderInfo(position: 0),
+            ),
+          ],
+          groups: const [],
+        );
+
+        await repository.saveData(data);
+
+        final plaintextFile = await repository.getLocalFile();
+        final encryptedFile = await repository.getEncryptedLocalFile();
+
+        expect(await plaintextFile.exists(), isTrue);
+        expect(await encryptedFile.exists(), isFalse);
+        expect(
+          AppData.fromJsonString(await plaintextFile.readAsString()).toJson(),
+          equals(data.toJson()),
+        );
+      });
+
+      test('should save encrypted mode only to data.bin', () async {
+        final repository = StorageRepository(localPathOverride: tempDir.path);
+        final existingPlaintextData = AppData(
+          services: const [
+            OtpService(
+              id: 'old-service',
+              name: 'Old Plaintext',
+              secret: 'OLDSECRET',
+              otp: OtpConfig(account: 'old@example.com', issuer: 'Old'),
+              order: OrderInfo(position: 0),
+            ),
+          ],
+          groups: const [],
+        );
+        final encryptedData = AppData(
+          services: const [
+            OtpService(
+              id: 'vault-service',
+              name: 'Vault',
+              secret: 'VAULTSECRET',
+              otp: OtpConfig(account: 'vault@example.com', issuer: 'Vault'),
+              order: OrderInfo(position: 0),
+            ),
+          ],
+          groups: const [],
+        );
+
+        await repository.writeAppDataJson(existingPlaintextData);
+        await repository.saveData(
+          encryptedData,
+          source: StorageDataSource.encryptedVault,
+          password: 'vault-password',
+        );
+
+        final plaintextFile = await repository.getLocalFile();
+        final encryptedFile = await repository.getEncryptedLocalFile();
+        final loaded =
+            await repository.loadStoredData(password: 'vault-password');
+
+        expect(await plaintextFile.exists(), isFalse);
+        expect(await encryptedFile.exists(), isTrue);
+        expect(loaded.source, equals(StorageDataSource.encryptedVault));
+        expect(loaded.data.toJson(), equals(encryptedData.toJson()));
       });
     });
 

@@ -17,7 +17,7 @@ class DataDirectoryPage extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Path to the Documents folder:'),
+          const Text('Application support directory:'),
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),
@@ -25,7 +25,10 @@ class DataDirectoryPage extends StatelessWidget {
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.2),
+                color: Theme.of(context)
+                    .colorScheme
+                    .outline
+                    .withValues(alpha: 0.2),
               ),
             ),
             child: SelectableText(
@@ -35,6 +38,14 @@ class DataDirectoryPage extends StatelessWidget {
                 fontSize: 13,
                 color: Theme.of(context).colorScheme.onSurface,
               ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'LibreOTP stores local data files here, including plaintext data.json and encrypted data.bin.',
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: 8),
