@@ -41,9 +41,8 @@ void main() async {
   final savedBounds = await AppConfig.getWindowBounds();
   final wasMaximized = await AppConfig.getWindowMaximized();
 
-  final boundsOnScreen = savedBounds != null
-      ? await _isBoundsOnScreen(savedBounds)
-      : false;
+  final boundsOnScreen =
+      savedBounds != null ? await _isBoundsOnScreen(savedBounds) : false;
 
   final windowOptions = WindowOptions(
     size: (savedBounds != null && boundsOnScreen)

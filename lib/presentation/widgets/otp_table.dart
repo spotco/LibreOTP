@@ -100,7 +100,8 @@ class OtpTable extends StatelessWidget {
       String groupName = groupNames[entry.key] ?? 'Unknown Group';
 
       // Add group header row
-      rows.add(GroupHeader(key: ValueKey('header:${entry.key}'), groupName: groupName));
+      rows.add(GroupHeader(
+          key: ValueKey('header:${entry.key}'), groupName: groupName));
 
       // Add service rows
       for (int i = 0; i < entry.value.length; i++) {
