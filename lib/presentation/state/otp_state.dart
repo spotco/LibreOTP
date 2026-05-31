@@ -52,6 +52,7 @@ class OtpState extends ChangeNotifier {
   bool _dataInitialized = false;
   PasswordPromptReason _passwordPromptReason = PasswordPromptReason.none;
   bool _shouldPromptForEncryptionMigration = false;
+  bool _encryptionMigrationDismissed = false;
   StorageDataSource _activeStorageSource = StorageDataSource.none;
   String? _localVaultPassword;
   Uint8List? _vaultKey;
@@ -260,11 +261,13 @@ class OtpState extends ChangeNotifier {
         AppConfig.getDisplayMode().catchError((_) => DisplayMode.grouped),
         _storageRepository.getLocalFile(),
         _storageRepository.hasExistingData(),
+        AppConfig.getEncryptionMigrationDismissed().catchError((_) => false),
       ]);
       _displayMode = results[0] as DisplayMode;
       final file = results[1] as File;
       _dataDirectory = file.parent.path;
       _hasExistingData = results[2] as bool;
+      _encryptionMigrationDismissed = results[3] as bool;
 
       // Yield after file system access to keep UI responsive
       if (withUIYields) await _yieldToUI(16);
@@ -368,6 +371,10 @@ class OtpState extends ChangeNotifier {
   }
 
   void dismissEncryptionMigrationPrompt() {
+    _encryptionMigrationDismissed = true;
+    AppConfig.setEncryptionMigrationDismissed(true).catchError((e) {
+      debugPrint('Could not persist encryption migration dismissal: $e');
+    });
     if (!_shouldPromptForEncryptionMigration) {
       return;
     }
@@ -747,9 +754,9 @@ class OtpState extends ChangeNotifier {
     if (result.source != StorageDataSource.encryptedVault) {
       _clearVaultSessionKey();
     }
-    _shouldPromptForEncryptionMigration =
+    _shouldPromptForEncryptionMigration = !_encryptionMigrationDismissed &&
         result.source == StorageDataSource.plaintextJson &&
-            (_services.isNotEmpty || _groups.isNotEmpty);
+        (_services.isNotEmpty || _groups.isNotEmpty);
   }
 
   void _setStorageModeAfterImport() {
@@ -761,8 +768,8 @@ class OtpState extends ChangeNotifier {
     _activeStorageSource = StorageDataSource.plaintextJson;
     _localVaultPassword = null;
     _clearVaultSessionKey();
-    _shouldPromptForEncryptionMigration =
-        _services.isNotEmpty || _groups.isNotEmpty;
+    _shouldPromptForEncryptionMigration = !_encryptionMigrationDismissed &&
+        (_services.isNotEmpty || _groups.isNotEmpty);
   }
 
   Future<void> _persistCurrentData() async {

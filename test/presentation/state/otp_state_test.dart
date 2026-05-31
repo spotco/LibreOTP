@@ -7,6 +7,7 @@ import 'package:libreotp/data/models/group.dart';
 import 'package:libreotp/data/models/otp_service.dart';
 import 'package:libreotp/data/repositories/storage_repository.dart';
 import 'package:libreotp/domain/services/otp_service.dart';
+import 'package:libreotp/config/app_config.dart';
 import 'package:libreotp/config/display_mode.dart';
 import 'package:libreotp/presentation/state/otp_display_state.dart';
 import 'package:libreotp/presentation/state/otp_state.dart';
@@ -253,6 +254,55 @@ void main() {
 
         expect(otpState.shouldPromptForEncryptionMigration, isTrue);
         expect(otpState.canEncryptLocalData, isTrue);
+      });
+
+      test('should not offer encryption migration once it has been dismissed',
+          () async {
+        SharedPreferences.setMockInitialValues(
+            {'encryption_migration_dismissed': true});
+        final service = OtpService(
+          id: 'service-1',
+          name: 'Plaintext',
+          secret: 'SECRET',
+          otp: const OtpConfig(account: 'plain@example.com', issuer: 'Plain'),
+          order: const OrderInfo(position: 0),
+        );
+        mockRepository.storedDataResult = LoadedAppData(
+          data: AppData(groups: const [], services: [service]),
+          source: StorageDataSource.plaintextJson,
+        );
+
+        await otpState.initializeData();
+
+        expect(otpState.shouldPromptForEncryptionMigration, isFalse);
+        expect(otpState.canEncryptLocalData, isTrue);
+      });
+
+      test(
+          'should not re-offer encryption migration after dismissal on relaunch',
+          () async {
+        final service = OtpService(
+          id: 'service-1',
+          name: 'Plaintext',
+          secret: 'SECRET',
+          otp: const OtpConfig(account: 'plain@example.com', issuer: 'Plain'),
+          order: const OrderInfo(position: 0),
+        );
+        mockRepository.storedDataResult = LoadedAppData(
+          data: AppData(groups: const [], services: [service]),
+          source: StorageDataSource.plaintextJson,
+        );
+        await otpState.initializeData();
+        expect(otpState.shouldPromptForEncryptionMigration, isTrue);
+
+        otpState.dismissEncryptionMigrationPrompt();
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        expect(await AppConfig.getEncryptionMigrationDismissed(), isTrue);
+
+        final relaunched = OtpState(mockRepository, mockGenerator);
+        await relaunched.initializeData();
+        expect(relaunched.shouldPromptForEncryptionMigration, isFalse);
+        relaunched.dispose();
       });
 
       test('should migrate plaintext data to encrypted vault', () async {
