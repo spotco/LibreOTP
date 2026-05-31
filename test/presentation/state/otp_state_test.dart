@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,6 +10,7 @@ import 'package:libreotp/domain/services/otp_service.dart';
 import 'package:libreotp/config/display_mode.dart';
 import 'package:libreotp/presentation/state/otp_display_state.dart';
 import 'package:libreotp/presentation/state/otp_state.dart';
+import 'package:libreotp/services/local_vault_encryption_service.dart';
 
 // Mock classes
 class MockStorageRepository extends StorageRepository {
@@ -16,10 +18,14 @@ class MockStorageRepository extends StorageRepository {
   List<OtpService> _services = [];
   bool shouldThrowException = false;
   Object? loadStoredDataException;
+  Object? passwordLoadException;
   LoadedAppData? storedDataResult;
+  LoadedAppData? passwordLoadResult;
   StorageDataSource? savedSource;
   String? encryptedSavePassword;
   AppData? savedData;
+  VaultKdfParameters kdfParameters =
+      VaultKdfParameters(salt: Uint8List(32), iterations: 1000);
   late File _testFile;
 
   MockStorageRepository() {
@@ -27,6 +33,9 @@ class MockStorageRepository extends StorageRepository {
     _testFile = File('${tempDir.path}/test_data.json');
     _testFile.writeAsStringSync('{"groups":[],"services":[]}');
   }
+
+  @override
+  Future<VaultKdfParameters> readVaultKdfParameters() async => kdfParameters;
 
   @override
   Future<AppData> loadData({String? password}) async {
@@ -38,6 +47,14 @@ class MockStorageRepository extends StorageRepository {
 
   @override
   Future<LoadedAppData> loadStoredData({String? password}) async {
+    if (password != null) {
+      if (passwordLoadException != null) {
+        throw passwordLoadException!;
+      }
+      if (passwordLoadResult != null) {
+        return passwordLoadResult!;
+      }
+    }
     if (loadStoredDataException != null) {
       throw loadStoredDataException!;
     }
@@ -53,6 +70,7 @@ class MockStorageRepository extends StorageRepository {
     AppData data, {
     StorageDataSource source = StorageDataSource.plaintextJson,
     String? password,
+    bool verify = false,
   }) async {
     savedData = data;
     savedSource = source;
@@ -301,6 +319,82 @@ void main() {
         await future;
         expect(otpState.isBusy, isFalse);
         expect(otpState.busyMessage, isNull);
+      });
+
+      test(
+          'wrong vault password keeps prompt and sets incorrect password kind',
+          () async {
+        mockRepository.loadStoredDataException =
+            const StoragePasswordRequiredException(
+          StorageDataSource.encryptedVault,
+          'Password required for encrypted vault',
+        );
+        mockRepository.passwordLoadException = const StorageLoadException(
+          StorageDataSource.encryptedVault,
+          'Failed to unlock encrypted vault',
+          kind: VaultLoadErrorKind.incorrectPassword,
+        );
+
+        await otpState.initializeData();
+        expect(otpState.requiresLocalVaultPassword, isTrue);
+
+        await otpState.loadDataWithPassword('wrong-password');
+
+        expect(otpState.requiresPassword, isTrue);
+        expect(otpState.requiresLocalVaultPassword, isTrue);
+        expect(otpState.encryptionErrorKind,
+            equals(VaultLoadErrorKind.incorrectPassword));
+        expect(otpState.usesEncryptedLocalStorage, isFalse);
+        expect(otpState.services, isEmpty);
+      });
+
+      test('successful vault unlock populates services and clears prompt',
+          () async {
+        final service = OtpService(
+          id: 'service-1',
+          name: 'Vault',
+          secret: 'SECRET',
+          otp: const OtpConfig(account: 'vault@example.com', issuer: 'Vault'),
+          order: const OrderInfo(position: 0),
+        );
+        mockRepository.loadStoredDataException =
+            const StoragePasswordRequiredException(
+          StorageDataSource.encryptedVault,
+          'Password required for encrypted vault',
+        );
+        mockRepository.passwordLoadResult = LoadedAppData(
+          data: AppData(groups: const [], services: [service]),
+          source: StorageDataSource.encryptedVault,
+        );
+
+        await otpState.initializeData();
+        expect(otpState.requiresLocalVaultPassword, isTrue);
+
+        await otpState.loadDataWithPassword('correct-password');
+
+        expect(otpState.usesEncryptedLocalStorage, isTrue);
+        expect(otpState.requiresPassword, isFalse);
+        expect(otpState.encryptionErrorKind, isNull);
+        expect(otpState.services.length, equals(1));
+      });
+
+      test('changeLocalVaultPassword throws when vault is not active',
+          () async {
+        final service = OtpService(
+          id: 'service-1',
+          name: 'Plaintext',
+          secret: 'SECRET',
+          otp: const OtpConfig(account: 'plain@example.com', issuer: 'Plain'),
+          order: const OrderInfo(position: 0),
+        );
+        mockRepository.setTestData(const [], [service]);
+        await otpState.initializeData();
+
+        expect(otpState.usesEncryptedLocalStorage, isFalse);
+        expect(
+          () => otpState.changeLocalVaultPassword('new-password'),
+          throwsA(isA<StateError>()),
+        );
       });
     });
 

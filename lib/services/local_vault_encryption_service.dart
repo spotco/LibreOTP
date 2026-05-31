@@ -3,7 +3,14 @@ import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:pointycastle/export.dart';
+import 'crypto_primitives.dart';
+
+class VaultKdfParameters {
+  final Uint8List salt;
+  final int iterations;
+
+  const VaultKdfParameters({required this.salt, required this.iterations});
+}
 
 class LocalVaultEncryptionService {
   static const String magic = 'LibreOTPVault';
@@ -14,7 +21,8 @@ class LocalVaultEncryptionService {
   static const int saltLength = 32;
   static const int nonceLength = 12;
   static const int authTagLength = 16;
-  static const int defaultIterations = 210000;
+  static const int defaultIterations = 600000;
+  static const int maxIterations = 10000000;
 
   static Future<Uint8List> encrypt(
     String plaintextJson,
@@ -43,13 +51,59 @@ class LocalVaultEncryptionService {
     }
 
     final salt = _randomBytes(saltLength);
+    final key = _deriveKey(password, salt, iterations);
+    return _buildEnvelope(
+      plaintextJson,
+      key,
+      salt: salt,
+      iterations: iterations,
+    );
+  }
+
+  static Future<Uint8List> deriveKey(
+    String password,
+    Uint8List salt,
+    int iterations,
+  ) async {
+    return Isolate.run(() {
+      if (password.isEmpty) {
+        throw ArgumentError('Password required for encrypted vault');
+      }
+      if (iterations <= 0) {
+        throw ArgumentError('KDF iterations must be greater than zero');
+      }
+      return _deriveKey(password, salt, iterations);
+    });
+  }
+
+  static Future<Uint8List> encryptWithKey(
+    String plaintextJson,
+    Uint8List key, {
+    required Uint8List salt,
+    required int iterations,
+  }) async {
+    return Isolate.run(
+      () => _buildEnvelope(
+        plaintextJson,
+        key,
+        salt: salt,
+        iterations: iterations,
+      ),
+    );
+  }
+
+  static Uint8List _buildEnvelope(
+    String plaintextJson,
+    Uint8List key, {
+    required Uint8List salt,
+    required int iterations,
+  }) {
     final nonce = _randomBytes(nonceLength);
     final metadata = _metadata(
       salt: salt,
       nonce: nonce,
       iterations: iterations,
     );
-    final key = _deriveKey(password, salt, iterations);
     final ciphertextWithTag = _encryptAesGcm(
       utf8.encode(plaintextJson),
       key,
@@ -70,6 +124,16 @@ class LocalVaultEncryptionService {
     String password,
   ) async {
     return Isolate.run(() => _decryptSync(vaultBytes, password));
+  }
+
+  static VaultKdfParameters readKdfParameters(Uint8List vaultBytes) {
+    final envelope = _decodeEnvelope(vaultBytes);
+    final metadata = _validateAndExtractMetadata(envelope);
+    final kdf = metadata['kdf'] as Map<String, dynamic>;
+    return VaultKdfParameters(
+      salt: base64.decode(kdf['salt'] as String),
+      iterations: kdf['iterations'] as int,
+    );
   }
 
   static String _decryptSync(
@@ -162,7 +226,9 @@ class LocalVaultEncryptionService {
     if (cipher['name'] != cipherName) {
       throw UnsupportedError('Unsupported encrypted vault cipher');
     }
-    if (kdf['iterations'] is! int || (kdf['iterations'] as int) <= 0) {
+    if (kdf['iterations'] is! int ||
+        (kdf['iterations'] as int) <= 0 ||
+        (kdf['iterations'] as int) > maxIterations) {
       throw const FormatException('Invalid encrypted vault KDF iterations');
     }
     if (kdf['keyLength'] != keyLength) {
@@ -214,9 +280,7 @@ class LocalVaultEncryptionService {
     Uint8List salt,
     int iterations,
   ) {
-    final pbkdf2 = PBKDF2KeyDerivator(HMac(SHA256Digest(), 64));
-    pbkdf2.init(Pbkdf2Parameters(salt, iterations, keyLength));
-    return pbkdf2.process(Uint8List.fromList(utf8.encode(password)));
+    return derivePbkdf2HmacSha256Key(password, salt, iterations, keyLength);
   }
 
   static Uint8List _encryptAesGcm(
@@ -225,15 +289,13 @@ class LocalVaultEncryptionService {
     Uint8List nonce,
     Uint8List authenticatedData,
   ) {
-    final cipher = GCMBlockCipher(AESEngine());
-    final params = AEADParameters(
-      KeyParameter(key),
-      authTagLength * 8,
+    return aesGcmEncrypt(
+      key,
       nonce,
+      Uint8List.fromList(plaintext),
       authenticatedData,
+      authTagLength,
     );
-    cipher.init(true, params);
-    return cipher.process(Uint8List.fromList(plaintext));
   }
 
   static Uint8List _decryptAesGcm(
@@ -242,21 +304,18 @@ class LocalVaultEncryptionService {
     Uint8List nonce,
     Uint8List authenticatedData,
   ) {
-    if (ciphertextWithTag.length <= authTagLength) {
+    if (ciphertextWithTag.length < authTagLength) {
       throw const FormatException('Invalid encrypted vault ciphertext length');
     }
 
-    final cipher = GCMBlockCipher(AESEngine());
-    final params = AEADParameters(
-      KeyParameter(key),
-      authTagLength * 8,
-      nonce,
-      authenticatedData,
-    );
-    cipher.init(false, params);
-
     try {
-      return cipher.process(ciphertextWithTag);
+      return aesGcmDecrypt(
+        key,
+        nonce,
+        ciphertextWithTag,
+        authenticatedData,
+        authTagLength,
+      );
     } catch (_) {
       throw ArgumentError('Invalid password or corrupted encrypted vault');
     }

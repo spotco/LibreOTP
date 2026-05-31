@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:libreotp/data/models/group.dart';
@@ -391,6 +392,35 @@ void main() {
                   (error) => error.message,
                   'message',
                   contains('Failed to unlock encrypted vault'),
+                )
+                .having(
+                  (error) => error.kind,
+                  'kind',
+                  VaultLoadErrorKind.incorrectPassword,
+                ),
+          ),
+        );
+      });
+
+      test('should report corrupted vault when data.bin is malformed',
+          () async {
+        final repository = StorageRepository(localPathOverride: tempDir.path);
+        final encryptedFile = await repository.getEncryptedLocalFile();
+        await encryptedFile.writeAsBytes(utf8.encode('not a vault envelope'));
+
+        expect(
+          () => repository.loadStoredData(password: 'any-password'),
+          throwsA(
+            isA<StorageLoadException>()
+                .having(
+                  (error) => error.source,
+                  'source',
+                  StorageDataSource.encryptedVault,
+                )
+                .having(
+                  (error) => error.kind,
+                  'kind',
+                  VaultLoadErrorKind.corruptedVault,
                 ),
           ),
         );

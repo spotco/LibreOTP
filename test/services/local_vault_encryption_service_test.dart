@@ -106,5 +106,91 @@ void main() {
         throwsA(isA<FormatException>()),
       );
     });
+
+    test('should reject iterations above the maximum bound', () async {
+      final vaultBytes = await LocalVaultEncryptionService.encrypt(
+        plaintextJson,
+        password,
+        iterations: 1000,
+      );
+      final envelope =
+          jsonDecode(utf8.decode(vaultBytes)) as Map<String, dynamic>;
+      envelope['kdf']['iterations'] =
+          LocalVaultEncryptionService.maxIterations + 1;
+      final tamperedBytes =
+          Uint8List.fromList(utf8.encode(jsonEncode(envelope)));
+
+      expect(
+        () => LocalVaultEncryptionService.decrypt(tamperedBytes, password),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('should round trip unicode password and emoji plaintext', () async {
+      const unicodePassword = 'pâsswörd-ǔnicode-🔐';
+      const unicodePlaintext = '{"note":"héllo wörld 🚀🔑 日本語"}';
+
+      final vaultBytes = await LocalVaultEncryptionService.encrypt(
+        unicodePlaintext,
+        unicodePassword,
+        iterations: 1000,
+      );
+
+      final decrypted = await LocalVaultEncryptionService.decrypt(
+        vaultBytes,
+        unicodePassword,
+      );
+
+      expect(decrypted, equals(unicodePlaintext));
+    });
+
+    test('should throw when encrypting with an empty password', () async {
+      expect(
+        () => LocalVaultEncryptionService.encrypt('', '', iterations: 1000),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('should throw when decrypting with an empty password', () async {
+      final vaultBytes = await LocalVaultEncryptionService.encrypt(
+        plaintextJson,
+        password,
+        iterations: 1000,
+      );
+
+      expect(
+        () => LocalVaultEncryptionService.decrypt(vaultBytes, ''),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('should round-trip empty plaintext', () async {
+      final vault = await LocalVaultEncryptionService.encrypt(
+        '',
+        'pw',
+        iterations: 1000,
+      );
+      expect(await LocalVaultEncryptionService.decrypt(vault, 'pw'), equals(''));
+    });
+
+    test('should reject tampered KDF iterations bound by AAD', () async {
+      final vaultBytes = await LocalVaultEncryptionService.encrypt(
+        plaintextJson,
+        password,
+        iterations: 5000,
+      );
+      final envelope =
+          jsonDecode(utf8.decode(vaultBytes)) as Map<String, dynamic>;
+      final kdf = envelope['kdf'] as Map<String, dynamic>;
+      expect(kdf['iterations'], equals(5000));
+      kdf['iterations'] = 6000;
+      final tamperedBytes =
+          Uint8List.fromList(utf8.encode(jsonEncode(envelope)));
+
+      expect(
+        () => LocalVaultEncryptionService.decrypt(tamperedBytes, password),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
   });
 }

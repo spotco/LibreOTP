@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:libreotp/data/repositories/storage_repository.dart';
 import 'package:libreotp/presentation/widgets/password_dialog.dart';
 
 void main() {
@@ -140,6 +141,57 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(result, equals('matching-password'));
+    });
+
+    testWidgets('shows change vault password copy and confirm field',
+        (WidgetTester tester) async {
+      await openDialog(
+        tester,
+        const PasswordDialog(mode: PasswordDialogMode.changeVaultPassword),
+      );
+
+      expect(find.text('Change Vault Password'), findsOneWidget);
+      expect(find.text('Change Password'), findsOneWidget);
+      expect(find.byType(TextField), findsNWidgets(2));
+      expect(find.widgetWithText(TextField, 'New Password'), findsOneWidget);
+      expect(
+        find.widgetWithText(TextField, 'Confirm Password'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('renders corrupted vault error copy',
+        (WidgetTester tester) async {
+      await openDialog(
+        tester,
+        const PasswordDialog(
+          mode: PasswordDialogMode.unlockVault,
+          errorKind: VaultLoadErrorKind.corruptedVault,
+        ),
+      );
+
+      expect(
+        find.text(
+          'This vault file appears to be corrupted or was created by a newer version.',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('renders incorrect password error copy',
+        (WidgetTester tester) async {
+      await openDialog(
+        tester,
+        const PasswordDialog(
+          mode: PasswordDialogMode.unlockVault,
+          errorKind: VaultLoadErrorKind.incorrectPassword,
+        ),
+      );
+
+      expect(
+        find.text('Incorrect password. Please try again.'),
+        findsOneWidget,
+      );
     });
   });
 }

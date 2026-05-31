@@ -66,6 +66,7 @@ class _DashboardPageState extends State<DashboardPage> {
             ? PasswordDialogMode.unlockVault
             : PasswordDialogMode.decryptBackup,
         errorMessage: otpState.encryptionError,
+        errorKind: otpState.encryptionErrorKind,
       ),
     );
 
@@ -304,6 +305,7 @@ class _DashboardPageState extends State<DashboardPage> {
       builder: (context) => PasswordDialog(
         mode: PasswordDialogMode.decryptBackup,
         errorMessage: otpState.encryptionError,
+        errorKind: otpState.encryptionErrorKind,
       ),
     );
 
@@ -578,7 +580,13 @@ class _DashboardPageState extends State<DashboardPage> {
                       ),
                       const SizedBox(width: 16),
                       OutlinedButton(
-                        onPressed: () => otpState.clearStoredPassword(),
+                        onPressed: () {
+                          if (isLocalVault) {
+                            _showPasswordDialog();
+                          } else {
+                            otpState.clearStoredPassword();
+                          }
+                        },
                         child: const Text('Use Different Password'),
                       ),
                       const SizedBox(width: 16),

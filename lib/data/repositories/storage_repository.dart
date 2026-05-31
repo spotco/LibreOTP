@@ -67,11 +67,18 @@ class StoragePasswordRequiredException implements Exception {
   String toString() => message;
 }
 
+enum VaultLoadErrorKind { incorrectPassword, corruptedVault, unknown }
+
 class StorageLoadException implements Exception {
   final StorageDataSource source;
   final String message;
+  final VaultLoadErrorKind kind;
 
-  const StorageLoadException(this.source, this.message);
+  const StorageLoadException(
+    this.source,
+    this.message, {
+    this.kind = VaultLoadErrorKind.unknown,
+  });
 
   @override
   String toString() => message;
@@ -123,12 +130,21 @@ class StorageRepository {
     return file.readAsBytes();
   }
 
+  Future<VaultKdfParameters> readVaultKdfParameters() async {
+    final contents = await readEncryptedAppData();
+    return LocalVaultEncryptionService.readKdfParameters(contents);
+  }
+
   Future<void> writeAppDataJson(AppData data) async {
     final file = await getLocalFile();
     await file.writeAsString(data.toJsonString());
   }
 
-  Future<void> saveEncryptedData(AppData data, String password) async {
+  Future<void> saveEncryptedData(
+    AppData data,
+    String password, {
+    bool verify = false,
+  }) async {
     final encryptedFile = await getEncryptedLocalFile();
     final tempFile = File('${encryptedFile.path}.tmp');
     final plaintextJson = serializePlaintextAppData(data);
@@ -140,15 +156,48 @@ class StorageRepository {
       );
       await tempFile.writeAsBytes(encryptedBytes, flush: true);
 
-      final verifiedJson = await LocalVaultEncryptionService.decrypt(
-        await tempFile.readAsBytes(),
-        password,
-      );
-      if (verifiedJson != plaintextJson) {
-        throw const FileSystemException(
-          'Encrypted vault verification failed after write',
+      if (verify) {
+        final verifiedJson = await LocalVaultEncryptionService.decrypt(
+          await tempFile.readAsBytes(),
+          password,
         );
+        if (verifiedJson != plaintextJson) {
+          throw const FileSystemException(
+            'Encrypted vault verification failed after write',
+          );
+        }
       }
+
+      if (await encryptedFile.exists()) {
+        await encryptedFile.delete();
+      }
+
+      await tempFile.rename(encryptedFile.path);
+    } finally {
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+    }
+  }
+
+  Future<void> saveEncryptedDataWithKey(
+    AppData data,
+    Uint8List key, {
+    required Uint8List salt,
+    required int iterations,
+  }) async {
+    final encryptedFile = await getEncryptedLocalFile();
+    final tempFile = File('${encryptedFile.path}.tmp');
+    final plaintextJson = serializePlaintextAppData(data);
+
+    try {
+      final encryptedBytes = await LocalVaultEncryptionService.encryptWithKey(
+        plaintextJson,
+        key,
+        salt: salt,
+        iterations: iterations,
+      );
+      await tempFile.writeAsBytes(encryptedBytes, flush: true);
 
       if (await encryptedFile.exists()) {
         await encryptedFile.delete();
@@ -173,7 +222,7 @@ class StorageRepository {
     AppData data,
     String password,
   ) async {
-    await saveEncryptedData(data, password);
+    await saveEncryptedData(data, password, verify: true);
     await deletePlaintextData();
   }
 
@@ -258,13 +307,14 @@ class StorageRepository {
     AppData data, {
     StorageDataSource source = StorageDataSource.plaintextJson,
     String? password,
+    bool verify = false,
   }) async {
     try {
       if (isEncryptedLocalSource(source)) {
         if (password == null || password.isEmpty) {
           throw ArgumentError('Password required for encrypted vault');
         }
-        await saveEncryptedData(data, password);
+        await saveEncryptedData(data, password, verify: verify);
         await deletePlaintextData();
         return;
       }
@@ -350,9 +400,18 @@ class StorageRepository {
         source: StorageDataSource.encryptedVault,
       );
     } catch (e) {
+      final VaultLoadErrorKind kind;
+      if (e is ArgumentError) {
+        kind = VaultLoadErrorKind.incorrectPassword;
+      } else if (e is FormatException || e is UnsupportedError) {
+        kind = VaultLoadErrorKind.corruptedVault;
+      } else {
+        kind = VaultLoadErrorKind.unknown;
+      }
       throw StorageLoadException(
         StorageDataSource.encryptedVault,
         'Failed to unlock encrypted vault: $e',
+        kind: kind,
       );
     }
   }
@@ -423,7 +482,10 @@ class StorageRepository {
     // Check if backup is encrypted
     if (TwoFasDecryptionService.isEncrypted(jsonData)) {
       if (password == null) {
-        throw ArgumentError('Password required for encrypted backup');
+        throw const StoragePasswordRequiredException(
+          StorageDataSource.encryptedBackupJson,
+          'Password required for encrypted backup',
+        );
       }
 
       // Decrypt the services

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../data/repositories/storage_repository.dart';
+
 enum PasswordDialogMode {
   unlockVault,
   decryptBackup,
@@ -10,11 +12,13 @@ enum PasswordDialogMode {
 class PasswordDialog extends StatefulWidget {
   final PasswordDialogMode mode;
   final String? errorMessage;
+  final VaultLoadErrorKind? errorKind;
 
   const PasswordDialog({
     super.key,
     required this.mode,
     this.errorMessage,
+    this.errorKind,
   });
 
   @override
@@ -254,36 +258,26 @@ class _PasswordDialogState extends State<PasswordDialog> {
     if (_validationError != null) {
       return _validationError;
     }
-    if (widget.errorMessage == null) {
-      return null;
-    }
-    return _mapErrorMessage(widget.errorMessage!);
-  }
 
-  String _mapErrorMessage(String error) {
     if (_requiresConfirmation) {
+      if (widget.errorMessage == null && widget.errorKind == null) {
+        return null;
+      }
       return 'An error occurred while creating the encrypted vault. Please try again.';
     }
 
-    if (error.contains('Invalid password') ||
-        error.contains('Decryption failed') ||
-        error.contains('Failed to unlock encrypted vault') ||
-        error.contains('Invalid password or corrupted encrypted vault')) {
-      return 'Incorrect password. Please try again.';
+    switch (widget.errorKind) {
+      case VaultLoadErrorKind.corruptedVault:
+        return 'This vault file appears to be corrupted or was created by a newer version.';
+      case VaultLoadErrorKind.incorrectPassword:
+        return 'Incorrect password. Please try again.';
+      case VaultLoadErrorKind.unknown:
+      case null:
+        break;
     }
 
-    if (error.contains('Invalid encrypted vault file') ||
-        error.contains('Invalid encrypted vault format')) {
-      return 'This encrypted vault appears to be corrupted or invalid.';
-    }
-
-    if (error.contains('Invalid vault file') ||
-        error.contains('Invalid encrypted backup format')) {
-      return 'This backup file appears to be corrupted or invalid.';
-    }
-
-    if (error.contains('Password required')) {
-      return _modeNameForMissingPassword();
+    if (widget.errorMessage == null) {
+      return null;
     }
 
     if (widget.mode == PasswordDialogMode.unlockVault) {

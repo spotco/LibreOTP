@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../../config/app_config.dart';
 import '../../config/display_mode.dart';
@@ -8,6 +9,7 @@ import '../../data/models/group.dart';
 import '../../data/repositories/storage_repository.dart';
 import '../../domain/services/otp_service.dart';
 import '../../utils/clipboard_utils.dart';
+import '../../services/local_vault_encryption_service.dart';
 import '../../services/secure_storage_service.dart';
 import '../../services/twofas_icon_service.dart';
 import 'otp_display_state.dart';
@@ -42,6 +44,7 @@ class OtpState extends ChangeNotifier {
   bool _isLoading = true;
   bool _requiresPassword = false;
   String? _encryptionError;
+  VaultLoadErrorKind? _encryptionErrorKind;
   bool _disposed = false;
   bool _hasExistingData = false;
   String? _selectedFilePath;
@@ -51,6 +54,9 @@ class OtpState extends ChangeNotifier {
   bool _shouldPromptForEncryptionMigration = false;
   StorageDataSource _activeStorageSource = StorageDataSource.none;
   String? _localVaultPassword;
+  Uint8List? _vaultKey;
+  Uint8List? _vaultSalt;
+  int? _vaultIterations;
   BusyOperation? _busyOperation;
 
   // Helper method to yield control to allow UI updates
@@ -117,6 +123,7 @@ class OtpState extends ChangeNotifier {
   bool get requiresBackupPassword =>
       _passwordPromptReason == PasswordPromptReason.encryptedBackup;
   String? get encryptionError => _encryptionError;
+  VaultLoadErrorKind? get encryptionErrorKind => _encryptionErrorKind;
   bool get hasExistingData => _hasExistingData;
   String? get selectedFilePath => _selectedFilePath;
   DisplayMode get displayMode => _displayMode;
@@ -150,6 +157,7 @@ class OtpState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _clearVaultSessionKey();
     _cancelAllTimers();
     _debouncedSaveTimer?.cancel();
     _usageResortTimer?.cancel();
@@ -204,6 +212,7 @@ class OtpState extends ChangeNotifier {
     _isLoading = true;
     _requiresPassword = false;
     _encryptionError = null;
+    _encryptionErrorKind = null;
     _passwordPromptReason = PasswordPromptReason.none;
     if (!_disposed) {
       notifyListeners();
@@ -235,6 +244,7 @@ class OtpState extends ChangeNotifier {
     _isLoading = true;
     _requiresPassword = false;
     _encryptionError = null;
+    _encryptionErrorKind = null;
     _passwordPromptReason = PasswordPromptReason.none;
     if (!_disposed) {
       notifyListeners();
@@ -284,6 +294,7 @@ class OtpState extends ChangeNotifier {
           ? PasswordPromptReason.encryptedVault
           : PasswordPromptReason.encryptedBackup;
       _encryptionError = e.toString();
+      _encryptionErrorKind = e.kind;
       debugPrint(_encryptionError);
       _isLoading = false;
       if (!_disposed) {
@@ -305,6 +316,7 @@ class OtpState extends ChangeNotifier {
   Future<void> loadDataWithPassword(String password) async {
     _isLoading = true;
     _encryptionError = null;
+    _encryptionErrorKind = null;
     notifyListeners();
 
     final busyOperation =
@@ -320,6 +332,11 @@ class OtpState extends ChangeNotifier {
         _groupedServices = _groupServicesByGroup();
         _requiresPassword = false;
         _passwordPromptReason = PasswordPromptReason.none;
+        _encryptionErrorKind = null;
+
+        if (result.source == StorageDataSource.encryptedVault) {
+          await _cacheVaultSessionKey(password);
+        }
 
         // Preload icons for imported services asynchronously
         _preloadIconsForServices();
@@ -330,6 +347,7 @@ class OtpState extends ChangeNotifier {
             : PasswordPromptReason.encryptedBackup;
       } on StorageLoadException catch (e) {
         _encryptionError = e.toString();
+        _encryptionErrorKind = e.kind;
         _requiresPassword = true;
         _passwordPromptReason = e.source == StorageDataSource.encryptedVault
             ? PasswordPromptReason.encryptedVault
@@ -634,14 +652,15 @@ class OtpState extends ChangeNotifier {
         _preloadIconsForServices();
 
         return true;
+      } on StoragePasswordRequiredException catch (_) {
+        _requiresPassword = true;
+        _passwordPromptReason = PasswordPromptReason.encryptedBackup;
+        _encryptionError = null;
+        _isLoading = false;
+        notifyListeners();
+        return false;
       } catch (e) {
-        if (e.toString().contains('Password required')) {
-          _requiresPassword = true;
-          _passwordPromptReason = PasswordPromptReason.encryptedBackup;
-          _encryptionError = null;
-        } else {
-          _encryptionError = 'Failed to import backup: $e';
-        }
+        _encryptionError = 'Failed to import backup: $e';
         _isLoading = false;
         notifyListeners();
         return false;
@@ -672,6 +691,7 @@ class OtpState extends ChangeNotifier {
   }
 
   Future<void> migratePlaintextDataToEncryptedVault(String password) async {
+    _debouncedSaveTimer?.cancel();
     await _runBusyOperation(BusyOperation.encryptingLocalData, () async {
       final data = AppData(services: _services, groups: _groups);
       await _storageRepository.migratePlaintextDataToEncryptedVault(
@@ -680,6 +700,7 @@ class OtpState extends ChangeNotifier {
       );
       _activeStorageSource = StorageDataSource.encryptedVault;
       _localVaultPassword = password;
+      await _cacheVaultSessionKey(password);
       _shouldPromptForEncryptionMigration = false;
       _hasExistingData = true;
       notifyListeners();
@@ -691,14 +712,17 @@ class OtpState extends ChangeNotifier {
       throw StateError('Encrypted local storage is not active');
     }
 
+    _debouncedSaveTimer?.cancel();
     await _runBusyOperation(BusyOperation.changingVaultPassword, () async {
       final data = AppData(services: _services, groups: _groups);
       await _storageRepository.saveData(
         data,
         source: StorageDataSource.encryptedVault,
         password: password,
+        verify: true,
       );
       _localVaultPassword = password;
+      await _cacheVaultSessionKey(password);
       notifyListeners();
     });
   }
@@ -720,6 +744,9 @@ class OtpState extends ChangeNotifier {
     _activeStorageSource = result.source;
     _localVaultPassword =
         result.source == StorageDataSource.encryptedVault ? password : null;
+    if (result.source != StorageDataSource.encryptedVault) {
+      _clearVaultSessionKey();
+    }
     _shouldPromptForEncryptionMigration =
         result.source == StorageDataSource.plaintextJson &&
             (_services.isNotEmpty || _groups.isNotEmpty);
@@ -733,16 +760,54 @@ class OtpState extends ChangeNotifier {
 
     _activeStorageSource = StorageDataSource.plaintextJson;
     _localVaultPassword = null;
+    _clearVaultSessionKey();
     _shouldPromptForEncryptionMigration =
         _services.isNotEmpty || _groups.isNotEmpty;
   }
 
   Future<void> _persistCurrentData() async {
     final data = AppData(services: _services, groups: _groups);
+
+    if (_activeStorageSource == StorageDataSource.encryptedVault &&
+        _vaultKey != null &&
+        _vaultSalt != null &&
+        _vaultIterations != null) {
+      await _storageRepository.saveEncryptedDataWithKey(
+        data,
+        _vaultKey!,
+        salt: _vaultSalt!,
+        iterations: _vaultIterations!,
+      );
+      await _storageRepository.deletePlaintextData();
+      return;
+    }
+
     await _storageRepository.saveData(
       data,
       source: _activeStorageSource,
       password: _localVaultPassword,
     );
+  }
+
+  Future<void> _cacheVaultSessionKey(String password) async {
+    try {
+      final params = await _storageRepository.readVaultKdfParameters();
+      _vaultKey = await LocalVaultEncryptionService.deriveKey(
+        password,
+        params.salt,
+        params.iterations,
+      );
+      _vaultSalt = params.salt;
+      _vaultIterations = params.iterations;
+    } catch (e) {
+      debugPrint('Could not cache vault session key: $e');
+      _clearVaultSessionKey();
+    }
+  }
+
+  void _clearVaultSessionKey() {
+    _vaultKey = null;
+    _vaultSalt = null;
+    _vaultIterations = null;
   }
 }
