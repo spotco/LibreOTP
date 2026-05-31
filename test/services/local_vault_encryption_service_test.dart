@@ -170,7 +170,8 @@ void main() {
         'pw',
         iterations: 1000,
       );
-      expect(await LocalVaultEncryptionService.decrypt(vault, 'pw'), equals(''));
+      expect(
+          await LocalVaultEncryptionService.decrypt(vault, 'pw'), equals(''));
     });
 
     test('should reject tampered KDF iterations bound by AAD', () async {

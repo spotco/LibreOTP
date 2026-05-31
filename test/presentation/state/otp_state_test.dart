@@ -321,8 +321,7 @@ void main() {
         expect(otpState.busyMessage, isNull);
       });
 
-      test(
-          'wrong vault password keeps prompt and sets incorrect password kind',
+      test('wrong vault password keeps prompt and sets incorrect password kind',
           () async {
         mockRepository.loadStoredDataException =
             const StoragePasswordRequiredException(
@@ -541,7 +540,8 @@ void main() {
         disposeState();
       });
 
-      testWidgets('should not increment count on repeated clicks with same code',
+      testWidgets(
+          'should not increment count on repeated clicks with same code',
           (WidgetTester tester) async {
         final testService = OtpService(
           id: 'service-1',
@@ -793,12 +793,14 @@ void main() {
         final afterClick = otpState.groupedServices['Most Used']!;
         expect(afterClick[0].id, equals('service-2')); // Still first
         expect(afterClick[1].id, equals('service-1')); // Still second
-        expect(afterClick[1].usageCount, equals(3)); // Count updated (first click = new code)
+        expect(afterClick[1].usageCount,
+            equals(3)); // Count updated (first click = new code)
 
         disposeState();
       });
 
-      testWidgets('should re-sort after 60 seconds', (WidgetTester tester) async {
+      testWidgets('should re-sort after 60 seconds',
+          (WidgetTester tester) async {
         final service1 = OtpService(
           id: 'service-1',
           name: 'Initially Low',
@@ -838,7 +840,8 @@ void main() {
         var services = otpState.groupedServices['Most Used']!;
         expect(services[0].id, equals('service-2'));
         expect(services[1].id, equals('service-1'));
-        expect(services[1].usageCount, equals(6)); // 2 + 4 clicks (each with different code)
+        expect(services[1].usageCount,
+            equals(6)); // 2 + 4 clicks (each with different code)
 
         // Advance time by 60 seconds to trigger resort
         await tester.pump(const Duration(seconds: 60));
@@ -891,14 +894,15 @@ void main() {
         final _ = otpState.groupedServices;
 
         // Change mode should clear cache
-        expect(
-            () => otpState.setDisplayMode(DisplayMode.grouped), returnsNormally);
+        expect(() => otpState.setDisplayMode(DisplayMode.grouped),
+            returnsNormally);
         expect(() => otpState.groupedServices, returnsNormally);
       });
     });
 
     group('Integration Tests', () {
-      testWidgets('full usage-based flow: click, stay in place, resort after 60s',
+      testWidgets(
+          'full usage-based flow: click, stay in place, resort after 60s',
           (WidgetTester tester) async {
         final service1 = OtpService(
           id: 'service-1',
@@ -959,7 +963,8 @@ void main() {
         mockGenerator.setNextCode('code-2');
         otpState.generateOtp('Most Used', 2, context);
         await tester.pump();
-        expect(otpState.groupedServices['Most Used']![2].usageCount, equals(3)); // Now tied with AWS
+        expect(otpState.groupedServices['Most Used']![2].usageCount,
+            equals(3)); // Now tied with AWS
 
         // Still at position 2 (cache still active)
         services = otpState.groupedServices['Most Used']!;
@@ -972,7 +977,8 @@ void main() {
         services = otpState.groupedServices['Most Used']!;
         expect(services[0].name, equals('Google')); // Still highest (5)
         // GitHub and AWS both have 3, but GitHub was used more recently
-        expect(services[1].name, equals('GitHub')); // Moved up due to recent use
+        expect(
+            services[1].name, equals('GitHub')); // Moved up due to recent use
         expect(services[2].name, equals('AWS'));
 
         disposeState();
