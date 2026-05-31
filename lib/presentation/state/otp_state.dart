@@ -463,12 +463,31 @@ class OtpState extends ChangeNotifier {
     return groupNames;
   }
 
+  void generateOtpForService(String serviceId, BuildContext context) {
+    final serviceIndexInList =
+        _services.indexWhere((service) => service.id == serviceId);
+    if (serviceIndexInList == -1) return;
+
+    final service = _services[serviceIndexInList];
+    _generateOtpForResolvedService(service, serviceIndexInList, context);
+  }
+
   void generateOtp(String groupId, int serviceIndex, BuildContext context) {
     final services = groupedServices[groupId];
     if (services == null || serviceIndex >= services.length) return;
 
     final service = services[serviceIndex];
+    final serviceIndexInList = _services.indexWhere((s) => s.id == service.id);
+    if (serviceIndexInList == -1) return;
 
+    _generateOtpForResolvedService(service, serviceIndexInList, context);
+  }
+
+  void _generateOtpForResolvedService(
+    OtpService service,
+    int serviceIndexInList,
+    BuildContext context,
+  ) {
     // Use service ID as the unique key
     final String serviceKey = service.id;
 
@@ -483,15 +502,11 @@ class OtpState extends ChangeNotifier {
 
     // Only increment usage count when the code is different (new TOTP period)
     if (isNewCode) {
-      final serviceIndexInList =
-          _services.indexWhere((s) => s.id == service.id);
-      if (serviceIndexInList != -1) {
-        _services[serviceIndexInList] = service.copyWith(
-          usageCount: service.usageCount + 1,
-          lastUsedAt: DateTime.now().toUtc(),
-        );
-        _scheduleDebouncedSave();
-      }
+      _services[serviceIndexInList] = service.copyWith(
+        usageCount: service.usageCount + 1,
+        lastUsedAt: DateTime.now().toUtc(),
+      );
+      _scheduleDebouncedSave();
 
       // Schedule delayed resort refresh only when usage actually changed
       _scheduleUsageResortRefresh();

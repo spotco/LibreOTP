@@ -21,7 +21,8 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   final TextEditingController _searchController = TextEditingController();
-  final bool _sortAscending = true;
+  int? _sortColumnIndex;
+  bool _sortAscending = true;
 
   @override
   void initState() {
@@ -67,6 +68,13 @@ class _DashboardPageState extends State<DashboardPage> {
   void _updateSearchQuery() {
     final otpState = Provider.of<OtpState>(context, listen: false);
     otpState.setSearchQuery(_searchController.text);
+  }
+
+  void _handleTableSort(int columnIndex, bool ascending) {
+    setState(() {
+      _sortColumnIndex = columnIndex;
+      _sortAscending = ascending;
+    });
   }
 
   Future<void> _showEditDialog(BuildContext context, OtpService service) async {
@@ -464,11 +472,18 @@ class _DashboardPageState extends State<DashboardPage> {
                           child: OtpTable(
                             groupedServices: otpState.groupedServices,
                             groupNames: otpState.getGroupNames(),
-                            onRowTap: (groupId, index) =>
-                                otpState.generateOtp(groupId, index, context),
+                            onRowTap: (service) => otpState
+                                .generateOtpForService(service.id, context),
                             onEditService: (service) =>
                                 _showEditDialog(context, service),
+                            sortColumnIndex: _sortColumnIndex,
                             sortAscending: _sortAscending,
+                            onSort: (columnIndex, _) => _handleTableSort(
+                              columnIndex,
+                              _sortColumnIndex == columnIndex
+                                  ? !_sortAscending
+                                  : true,
+                            ),
                           ),
                         ),
                       ),
