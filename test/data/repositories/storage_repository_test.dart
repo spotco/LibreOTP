@@ -668,6 +668,84 @@ void main() {
           expect(await tempFile.exists(), isFalse);
         },
       );
+
+      test(
+        'should prefer backup over a temp file with a broken ciphertext',
+        () async {
+          final repository = StorageRepository(localPathOverride: tempDir.path);
+          final data = AppData(
+            services: const [
+              OtpService(
+                id: 'vault-service',
+                name: 'Vault',
+                secret: 'VAULTSECRET',
+                otp: OtpConfig(account: 'vault@example.com', issuer: 'Vault'),
+                order: OrderInfo(position: 0),
+              ),
+            ],
+            groups: const [],
+          );
+
+          await repository.saveEncryptedData(data, 'vault-password');
+          final encryptedFile = await repository.getEncryptedLocalFile();
+          final backupFile = File('${encryptedFile.path}.bak');
+          final tempFile = File('${encryptedFile.path}.tmp');
+          // A temp file whose header parses but whose ciphertext is bogus
+          // must not shadow the recoverable backup.
+          final envelope =
+              jsonDecode(utf8.decode(await encryptedFile.readAsBytes()))
+                  as Map<String, dynamic>;
+          envelope['ciphertext'] = base64.encode([1, 2, 3]);
+          await tempFile.writeAsString(jsonEncode(envelope));
+          await encryptedFile.rename(backupFile.path);
+
+          final loaded = await repository.loadStoredData(
+            password: 'vault-password',
+          );
+
+          expect(loaded.source, equals(StorageDataSource.encryptedVault));
+          expect(loaded.data.toJson(), equals(data.toJson()));
+          expect(await encryptedFile.exists(), isTrue);
+          expect(await backupFile.exists(), isFalse);
+          expect(await tempFile.exists(), isFalse);
+        },
+      );
+
+      test(
+        'should remove leftover swap artifacts after a successful unlock',
+        () async {
+          final repository = StorageRepository(localPathOverride: tempDir.path);
+          final data = AppData(
+            services: const [
+              OtpService(
+                id: 'vault-service',
+                name: 'Vault',
+                secret: 'VAULTSECRET',
+                otp: OtpConfig(account: 'vault@example.com', issuer: 'Vault'),
+                order: OrderInfo(position: 0),
+              ),
+            ],
+            groups: const [],
+          );
+
+          await repository.saveEncryptedData(data, 'vault-password');
+          final encryptedFile = await repository.getEncryptedLocalFile();
+          final backupFile = File('${encryptedFile.path}.bak');
+          final tempFile = File('${encryptedFile.path}.tmp');
+          // A .bak left behind by a crashed swap may be encrypted under an
+          // old password; it must not outlive a successful unlock.
+          await encryptedFile.copy(backupFile.path);
+          await tempFile.writeAsBytes([1, 2, 3]);
+
+          final loaded = await repository.loadStoredData(
+            password: 'vault-password',
+          );
+
+          expect(loaded.source, equals(StorageDataSource.encryptedVault));
+          expect(await backupFile.exists(), isFalse);
+          expect(await tempFile.exists(), isFalse);
+        },
+      );
     });
 
     group('Data organization helpers', () {

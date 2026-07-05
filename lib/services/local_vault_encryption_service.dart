@@ -136,6 +136,22 @@ class LocalVaultEncryptionService {
     );
   }
 
+  /// Validates the full envelope structure, including the ciphertext field,
+  /// without decrypting. Throws on any structural problem. Cannot prove the
+  /// ciphertext decrypts - that requires the password.
+  static void validateEnvelope(Uint8List vaultBytes) {
+    final envelope = _decodeEnvelope(vaultBytes);
+    _validateAndExtractMetadata(envelope);
+    final ciphertextWithTag = _readBase64String(
+      envelope,
+      'ciphertext',
+      'Invalid encrypted vault ciphertext',
+    );
+    if (ciphertextWithTag.length < authTagLength) {
+      throw const FormatException('Invalid encrypted vault ciphertext length');
+    }
+  }
+
   static String _decryptSync(
     Uint8List vaultBytes,
     String password,

@@ -246,7 +246,7 @@ class StorageRepository {
 
     if (await tempFile.exists()) {
       try {
-        LocalVaultEncryptionService.readKdfParameters(
+        LocalVaultEncryptionService.validateEnvelope(
           await tempFile.readAsBytes(),
         );
         await tempFile.rename(encryptedFile.path);
@@ -260,6 +260,23 @@ class StorageRepository {
     if (!await encryptedFile.exists() && await backupFile.exists()) {
       await backupFile.rename(encryptedFile.path);
       debugPrint('Recovered encrypted vault from backup copy');
+    }
+  }
+
+  /// Removes leftover swap artifacts once the current vault has proven
+  /// loadable. A .bak may hold the vault under a previous password, so it
+  /// must not outlive a successful unlock.
+  Future<void> _cleanupVaultArtifactsAfterUnlock() async {
+    try {
+      final encryptedFile = await getEncryptedLocalFile();
+      for (final suffix in ['.tmp', '.bak']) {
+        final artifact = File('${encryptedFile.path}$suffix');
+        if (await artifact.exists()) {
+          await artifact.delete();
+        }
+      }
+    } catch (e) {
+      debugPrint('Could not clean up vault artifacts: $e');
     }
   }
 
@@ -428,6 +445,7 @@ class StorageRepository {
         contents,
         password,
       );
+      await _cleanupVaultArtifactsAfterUnlock();
       return LoadedAppData(
         data: parsePlaintextAppData(decryptedJson),
         source: StorageDataSource.encryptedVault,
