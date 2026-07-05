@@ -163,6 +163,29 @@ void main() {
         expect(() => otpState.groupedServices, returnsNormally);
         expect(otpState.groupedServices, isA<Map<String, List<OtpService>>>());
       });
+
+      test('should update service name and account details', () async {
+        final testService = OtpService(
+          id: 'service-1',
+          name: 'Old Name',
+          secret: 'JBSWY3DPEHPK3PXP',
+          otp: const OtpConfig(account: 'old@example.com', issuer: 'Test'),
+          order: const OrderInfo(position: 0),
+        );
+
+        mockRepository.setTestData([], [testService]);
+        await otpState.initializeData();
+
+        final didUpdate = otpState.updateServiceDetails(
+          serviceId: 'service-1',
+          name: 'New Name',
+          account: 'new@example.com',
+        );
+
+        expect(didUpdate, isTrue);
+        expect(otpState.services.first.name, equals('New Name'));
+        expect(otpState.services.first.otp.account, equals('new@example.com'));
+      });
     });
 
     group('OTP generation', () {
