@@ -168,11 +168,7 @@ class StorageRepository {
         }
       }
 
-      if (await encryptedFile.exists()) {
-        await encryptedFile.delete();
-      }
-
-      await tempFile.rename(encryptedFile.path);
+      await _replaceEncryptedFile(tempFile, encryptedFile);
     } finally {
       if (await tempFile.exists()) {
         await tempFile.delete();
@@ -199,15 +195,71 @@ class StorageRepository {
       );
       await tempFile.writeAsBytes(encryptedBytes, flush: true);
 
-      if (await encryptedFile.exists()) {
-        await encryptedFile.delete();
-      }
-
-      await tempFile.rename(encryptedFile.path);
+      await _replaceEncryptedFile(tempFile, encryptedFile);
     } finally {
       if (await tempFile.exists()) {
         await tempFile.delete();
       }
+    }
+  }
+
+  /// Atomically replaces [encryptedFile] with [tempFile], keeping the previous
+  /// vault as a .bak until the swap completes so an interrupted save can never
+  /// leave the vault missing. Rolls the backup straight back if the final
+  /// rename fails.
+  Future<void> _replaceEncryptedFile(File tempFile, File encryptedFile) async {
+    final backupFile = File('${encryptedFile.path}.bak');
+    var movedToBackup = false;
+
+    if (await encryptedFile.exists()) {
+      if (await backupFile.exists()) {
+        await backupFile.delete();
+      }
+      await encryptedFile.rename(backupFile.path);
+      movedToBackup = true;
+    }
+
+    try {
+      await tempFile.rename(encryptedFile.path);
+    } catch (_) {
+      if (movedToBackup && !await encryptedFile.exists()) {
+        await backupFile.rename(encryptedFile.path);
+      }
+      rethrow;
+    }
+
+    if (movedToBackup && await backupFile.exists()) {
+      await backupFile.delete();
+    }
+  }
+
+  /// Restores the vault from the leftover .tmp or .bak file if a previous
+  /// save was interrupted between the swap renames.
+  Future<void> _recoverEncryptedDataIfNeeded() async {
+    final encryptedFile = await getEncryptedLocalFile();
+    if (await encryptedFile.exists()) {
+      return;
+    }
+
+    final tempFile = File('${encryptedFile.path}.tmp');
+    final backupFile = File('${encryptedFile.path}.bak');
+
+    if (await tempFile.exists()) {
+      try {
+        LocalVaultEncryptionService.readKdfParameters(
+          await tempFile.readAsBytes(),
+        );
+        await tempFile.rename(encryptedFile.path);
+        debugPrint('Recovered encrypted vault from interrupted save');
+      } catch (e) {
+        debugPrint('Discarding invalid vault temp file: $e');
+        await tempFile.delete();
+      }
+    }
+
+    if (!await encryptedFile.exists() && await backupFile.exists()) {
+      await backupFile.rename(encryptedFile.path);
+      debugPrint('Recovered encrypted vault from backup copy');
     }
   }
 
@@ -237,10 +289,7 @@ class StorageRepository {
   }
 
   Future<bool> hasAnyLocalData() async {
-    final results = await Future.wait([
-      hasEncryptedData(),
-      hasPlaintextData(),
-    ]);
+    final results = await Future.wait([hasEncryptedData(), hasPlaintextData()]);
     return results.any((exists) => exists);
   }
 
@@ -260,13 +309,9 @@ class StorageRepository {
     return jsonDecode(jsonString) as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> readPlaintextJsonObject() async {
-    final contents = await readAppDataJson();
-    return decodeJsonObject(contents);
-  }
-
   Future<LoadedAppData> loadStoredData({String? password}) async {
     try {
+      await _recoverEncryptedDataIfNeeded();
       if (await hasEncryptedData()) {
         return await _loadEncryptedVaultData(password: password);
       }
@@ -286,20 +331,6 @@ class StorageRepository {
         StorageDataSource.none,
         'Error loading data: $e',
       );
-    }
-  }
-
-  Future<AppData> loadData({String? password}) async {
-    try {
-      final result = await loadStoredData(password: password);
-      return result.data;
-    } on StoragePasswordRequiredException {
-      rethrow;
-    } on StorageLoadException {
-      rethrow;
-    } catch (e) {
-      debugPrint('Error loading data: $e');
-      rethrow;
     }
   }
 
@@ -393,8 +424,10 @@ class StorageRepository {
 
     try {
       final contents = await readEncryptedAppData();
-      final decryptedJson =
-          await LocalVaultEncryptionService.decrypt(contents, password);
+      final decryptedJson = await LocalVaultEncryptionService.decrypt(
+        contents,
+        password,
+      );
       return LoadedAppData(
         data: parsePlaintextAppData(decryptedJson),
         source: StorageDataSource.encryptedVault,
@@ -478,7 +511,9 @@ class StorageRepository {
   }
 
   Future<AppData> _parseBackupData(
-      Map<String, dynamic> jsonData, String? password) async {
+    Map<String, dynamic> jsonData,
+    String? password,
+  ) async {
     // Check if backup is encrypted
     if (TwoFasDecryptionService.isEncrypted(jsonData)) {
       if (password == null) {
@@ -489,8 +524,10 @@ class StorageRepository {
       }
 
       // Decrypt the services
-      final decryptedServices =
-          await TwoFasDecryptionService.decryptBackup(jsonData, password);
+      final decryptedServices = await TwoFasDecryptionService.decryptBackup(
+        jsonData,
+        password,
+      );
       final servicesData = jsonDecode(decryptedServices) as List;
 
       // Parse decrypted services

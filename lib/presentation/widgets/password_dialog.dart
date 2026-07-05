@@ -125,11 +125,7 @@ class _PasswordDialogState extends State<PasswordDialog> {
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.error_outline,
-                    color: colorScheme.error,
-                    size: 20,
-                  ),
+                  Icon(Icons.error_outline, color: colorScheme.error, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -166,8 +162,9 @@ class _PasswordDialogState extends State<PasswordDialog> {
   }
 
   void _submitPassword() {
-    final password = _passwordController.text.trim();
-    final confirmPassword = _confirmPasswordController.text.trim();
+    // Never trim: surrounding whitespace is part of the password.
+    final password = _passwordController.text;
+    final confirmPassword = _confirmPasswordController.text;
 
     if (password.isEmpty) {
       setState(() {

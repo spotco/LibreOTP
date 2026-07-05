@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../config/app_config.dart';
+import '../../data/repositories/storage_repository.dart';
 import '../state/otp_state.dart';
 import '../widgets/search_bar.dart';
 import '../widgets/otp_table.dart';
@@ -38,6 +39,22 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  /// User-facing description of a load failure; internal exception text is
+  /// logged, never rendered.
+  String _loadErrorText(OtpState otpState) {
+    switch (otpState.encryptionErrorKind) {
+      case VaultLoadErrorKind.incorrectPassword:
+        return 'Incorrect password. Please try again.';
+      case VaultLoadErrorKind.corruptedVault:
+        return 'The vault file appears to be corrupted or was created by a '
+            'newer version of LibreOTP.';
+      case VaultLoadErrorKind.unknown:
+      case null:
+        return 'Your stored data could not be read. It may be corrupted. '
+            'You can retry or import a fresh 2FAS backup.';
+    }
+  }
+
   void _checkForEncryptionMigrationPrompt() {
     final otpState = Provider.of<OtpState>(context, listen: false);
     if (!otpState.shouldPromptForEncryptionMigration ||
@@ -72,7 +89,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
     if (password != null && mounted) {
       await otpState.loadDataWithPassword(password);
-      if (otpState.encryptionError != null && mounted) {
+      // Only re-prompt while a password is still the blocker; other load
+      // failures are surfaced by the dashboard error state instead.
+      if (otpState.requiresPassword && mounted) {
         _showPasswordDialog(); // Show dialog again with error
       }
     }
@@ -113,9 +132,8 @@ class _DashboardPageState extends State<DashboardPage> {
     final password = await showDialog<String>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const PasswordDialog(
-        mode: PasswordDialogMode.createVaultPassword,
-      ),
+      builder: (context) =>
+          const PasswordDialog(mode: PasswordDialogMode.createVaultPassword),
     );
 
     if (!mounted) {
@@ -166,9 +184,8 @@ class _DashboardPageState extends State<DashboardPage> {
     final password = await showDialog<String>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const PasswordDialog(
-        mode: PasswordDialogMode.changeVaultPassword,
-      ),
+      builder: (context) =>
+          const PasswordDialog(mode: PasswordDialogMode.changeVaultPassword),
     );
 
     if (!mounted || password == null) {
@@ -194,9 +211,7 @@ class _DashboardPageState extends State<DashboardPage> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Password Change Failed'),
-          content: Text(
-            'LibreOTP could not update the vault password.\n\n$e',
-          ),
+          content: Text('LibreOTP could not update the vault password.\n\n$e'),
           actions: [
             ElevatedButton(
               onPressed: () => Navigator.of(context).pop(),
@@ -260,7 +275,8 @@ class _DashboardPageState extends State<DashboardPage> {
         builder: (context) => AlertDialog(
           title: const Text('Import New Backup'),
           content: const Text(
-              'This will replace your current data with the imported backup. Are you sure you want to continue?'),
+            'This will replace your current data with the imported backup. Are you sure you want to continue?',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -369,10 +385,9 @@ class _DashboardPageState extends State<DashboardPage> {
                       '${otpState.services.length} services',
                       style: TextStyle(
                         fontSize: 14,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onPrimary
-                            .withValues(alpha: 0.8),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onPrimary.withValues(alpha: 0.8),
                         fontWeight: FontWeight.normal,
                       ),
                     );
@@ -382,14 +397,18 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
             actions: [
               IconButton(
-                icon: Icon(Icons.upload_file,
-                    color: Theme.of(context).colorScheme.onPrimary),
+                icon: Icon(
+                  Icons.upload_file,
+                  color: Theme.of(context).colorScheme.onPrimary,
+                ),
                 tooltip: 'Import 2FAS Backup',
                 onPressed: () => _showImportDialog(context),
               ),
               IconButton(
-                icon: Icon(Icons.folder_open,
-                    color: Theme.of(context).colorScheme.onPrimary),
+                icon: Icon(
+                  Icons.folder_open,
+                  color: Theme.of(context).colorScheme.onPrimary,
+                ),
                 tooltip: 'Show Data Directory',
                 onPressed: () => _showDataDirectory(context),
               ),
@@ -429,8 +448,10 @@ class _DashboardPageState extends State<DashboardPage> {
                   }
 
                   return PopupMenuButton<_StorageAction>(
-                    icon: Icon(Icons.lock_outline,
-                        color: Theme.of(context).colorScheme.onPrimary),
+                    icon: Icon(
+                      Icons.lock_outline,
+                      color: Theme.of(context).colorScheme.onPrimary,
+                    ),
                     tooltip: 'Storage',
                     onSelected: _handleStorageAction,
                     itemBuilder: (_) => items,
@@ -438,8 +459,10 @@ class _DashboardPageState extends State<DashboardPage> {
                 },
               ),
               PopupMenuButton<ThemeMode>(
-                icon: Icon(Icons.brightness_medium,
-                    color: Theme.of(context).colorScheme.onPrimary),
+                icon: Icon(
+                  Icons.brightness_medium,
+                  color: Theme.of(context).colorScheme.onPrimary,
+                ),
                 tooltip: 'Theme',
                 onSelected: widget.onThemeChanged,
                 itemBuilder: (context) => [
@@ -476,8 +499,10 @@ class _DashboardPageState extends State<DashboardPage> {
                 ],
               ),
               IconButton(
-                icon: Icon(Icons.info_outline,
-                    color: Theme.of(context).colorScheme.onPrimary),
+                icon: Icon(
+                  Icons.info_outline,
+                  color: Theme.of(context).colorScheme.onPrimary,
+                ),
                 tooltip: 'About',
                 onPressed: () => _showAboutDialog(context),
               ),
@@ -515,9 +540,11 @@ class _DashboardPageState extends State<DashboardPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.lock,
-                      size: 64,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  Icon(
+                    Icons.lock,
+                    size: 64,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     isLocalVault
@@ -534,7 +561,8 @@ class _DashboardPageState extends State<DashboardPage> {
                         ? 'Please provide the password to unlock your local vault.'
                         : 'Please provide the password to decrypt your backup.',
                     style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton.icon(
@@ -547,17 +575,24 @@ class _DashboardPageState extends State<DashboardPage> {
             );
           } else if (otpState.encryptionError != null) {
             final isLocalVault = otpState.requiresLocalVaultPassword;
+            final isPasswordRelated =
+                isLocalVault || otpState.requiresBackupPassword;
             content = Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.error,
-                      size: 64, color: Theme.of(context).colorScheme.error),
+                  Icon(
+                    Icons.error,
+                    size: 64,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     isLocalVault
                         ? 'Failed to Unlock Vault'
-                        : 'Failed to Load Backup',
+                        : isPasswordRelated
+                            ? 'Failed to Load Backup'
+                            : 'Failed to Load Data',
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -565,9 +600,10 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    otpState.encryptionError!,
+                    _loadErrorText(otpState),
                     style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
@@ -578,17 +614,19 @@ class _DashboardPageState extends State<DashboardPage> {
                         onPressed: () => otpState.retryDataLoad(),
                         child: const Text('Retry'),
                       ),
-                      const SizedBox(width: 16),
-                      OutlinedButton(
-                        onPressed: () {
-                          if (isLocalVault) {
-                            _showPasswordDialog();
-                          } else {
-                            otpState.clearStoredPassword();
-                          }
-                        },
-                        child: const Text('Use Different Password'),
-                      ),
+                      if (isPasswordRelated) ...[
+                        const SizedBox(width: 16),
+                        OutlinedButton(
+                          onPressed: () {
+                            if (isLocalVault) {
+                              _showPasswordDialog();
+                            } else {
+                              otpState.clearStoredPassword();
+                            }
+                          },
+                          child: const Text('Use Different Password'),
+                        ),
+                      ],
                       const SizedBox(width: 16),
                       ElevatedButton.icon(
                         onPressed: () => _showImportDialog(context),
@@ -606,8 +644,11 @@ class _DashboardPageState extends State<DashboardPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.security,
-                      size: 64, color: Theme.of(context).colorScheme.primary),
+                  Icon(
+                    Icons.security,
+                    size: 64,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                   const SizedBox(height: 16),
                   const Text(
                     'Welcome to LibreOTP',
@@ -617,8 +658,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   Text(
                     'Import your 2FAS backup to get started',
                     style: TextStyle(
-                        fontSize: 16,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      fontSize: 16,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton.icon(
@@ -627,15 +669,18 @@ class _DashboardPageState extends State<DashboardPage> {
                     label: const Text('Import 2FAS Backup'),
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 24, vertical: 12),
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 16),
                   Text(
                     'Export your data from the 2FAS app and select the JSON file',
                     style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                 ],
@@ -694,10 +739,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 }
 
-enum _StorageAction {
-  encryptLocalData,
-  changeVaultPassword,
-}
+enum _StorageAction { encryptLocalData, changeVaultPassword }
 
 class _BusyOverlay extends StatelessWidget {
   const _BusyOverlay();
@@ -709,10 +751,7 @@ class _BusyOverlay extends StatelessWidget {
     return Stack(
       children: [
         const Positioned.fill(
-          child: ModalBarrier(
-            dismissible: false,
-            color: Colors.black54,
-          ),
+          child: ModalBarrier(dismissible: false, color: Colors.black54),
         ),
         Center(
           child: ConstrainedBox(

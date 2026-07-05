@@ -14,11 +14,7 @@ import '../../services/secure_storage_service.dart';
 import '../../services/twofas_icon_service.dart';
 import 'otp_display_state.dart';
 
-enum PasswordPromptReason {
-  none,
-  encryptedVault,
-  encryptedBackup,
-}
+enum PasswordPromptReason { none, encryptedVault, encryptedBackup }
 
 enum BusyOperation {
   unlockingVault,
@@ -188,6 +184,12 @@ class OtpState extends ChangeNotifier {
 
     // Schedule a new save after 2 seconds of inactivity
     _debouncedSaveTimer = Timer(const Duration(seconds: 2), () async {
+      // Never write concurrently with a vault operation (migrate, change
+      // password, import) - both paths share the same vault temp file.
+      if (_busyOperation != null) {
+        _scheduleDebouncedSave();
+        return;
+      }
       try {
         await _persistCurrentData();
         debugPrint('Usage data saved successfully');
@@ -292,10 +294,12 @@ class OtpState extends ChangeNotifier {
       }
       return;
     } on StorageLoadException catch (e) {
-      _requiresPassword = true;
-      _passwordPromptReason = e.source == StorageDataSource.encryptedVault
-          ? PasswordPromptReason.encryptedVault
-          : PasswordPromptReason.encryptedBackup;
+      if (e.source != StorageDataSource.none) {
+        _requiresPassword = true;
+        _passwordPromptReason = e.source == StorageDataSource.encryptedVault
+            ? PasswordPromptReason.encryptedVault
+            : PasswordPromptReason.encryptedBackup;
+      }
       _encryptionError = e.toString();
       _encryptionErrorKind = e.kind;
       debugPrint(_encryptionError);
@@ -329,8 +333,9 @@ class OtpState extends ChangeNotifier {
 
     await _runBusyOperation(busyOperation, () async {
       try {
-        final result =
-            await _storageRepository.loadStoredData(password: password);
+        final result = await _storageRepository.loadStoredData(
+          password: password,
+        );
         _applyLoadedData(result, password: password);
         _groupedServices = _groupServicesByGroup();
         _requiresPassword = false;
@@ -351,10 +356,15 @@ class OtpState extends ChangeNotifier {
       } on StorageLoadException catch (e) {
         _encryptionError = e.toString();
         _encryptionErrorKind = e.kind;
-        _requiresPassword = true;
-        _passwordPromptReason = e.source == StorageDataSource.encryptedVault
-            ? PasswordPromptReason.encryptedVault
-            : PasswordPromptReason.encryptedBackup;
+        if (e.source == StorageDataSource.none) {
+          _requiresPassword = false;
+          _passwordPromptReason = PasswordPromptReason.none;
+        } else {
+          _requiresPassword = true;
+          _passwordPromptReason = e.source == StorageDataSource.encryptedVault
+              ? PasswordPromptReason.encryptedVault
+              : PasswordPromptReason.encryptedBackup;
+        }
         debugPrint('Error loading encrypted data: $e');
       } catch (e) {
         _encryptionError = e.toString();
@@ -477,9 +487,7 @@ class OtpState extends ChangeNotifier {
       _usageBasedSortCache = sortedServices;
     }
 
-    return {
-      'Most Used': sortedServices,
-    };
+    return {'Most Used': sortedServices};
   }
 
   Map<String, List<OtpService>> _filterAndGroupData() {
@@ -495,10 +503,12 @@ class OtpState extends ChangeNotifier {
     Map<String, List<OtpService>> filteredData = {};
     baseGrouping.forEach((groupId, services) {
       final filteredServices = services
-          .where((service) =>
-              service.name.toLowerCase().contains(_searchQuery) ||
-              service.otp.account.toLowerCase().contains(_searchQuery) ||
-              service.otp.issuer.toLowerCase().contains(_searchQuery))
+          .where(
+            (service) =>
+                service.name.toLowerCase().contains(_searchQuery) ||
+                service.otp.account.toLowerCase().contains(_searchQuery) ||
+                service.otp.issuer.toLowerCase().contains(_searchQuery),
+          )
           .toList();
 
       if (filteredServices.isNotEmpty) {
@@ -539,8 +549,9 @@ class OtpState extends ChangeNotifier {
 
     // Only increment usage count when the code is different (new TOTP period)
     if (isNewCode) {
-      final serviceIndexInList =
-          _services.indexWhere((s) => s.id == service.id);
+      final serviceIndexInList = _services.indexWhere(
+        (s) => s.id == service.id,
+      );
       if (serviceIndexInList != -1) {
         _services[serviceIndexInList] = service.copyWith(
           usageCount: service.usageCount + 1,
@@ -569,7 +580,9 @@ class OtpState extends ChangeNotifier {
     // Copy to clipboard
     ClipboardUtils.copyToClipboard(newCode);
     ClipboardUtils.showCopiedNotification(
-        context, 'OTP Code Copied to Clipboard!');
+      context,
+      'OTP Code Copied to Clipboard!',
+    );
 
     _startOtpTimer(serviceKey, timerKey, timeRemaining);
 
@@ -630,6 +643,7 @@ class OtpState extends ChangeNotifier {
 
   /// Imports a 2FAS backup file and replaces current data
   Future<bool> importBackupFile(String filePath, {String? password}) async {
+    _debouncedSaveTimer?.cancel();
     _isLoading = true;
     _encryptionError = null;
     notifyListeners();
@@ -642,8 +656,10 @@ class OtpState extends ChangeNotifier {
 
     Future<bool> performImport() async {
       try {
-        final data = await _storageRepository.importBackupFile(filePath,
-            password: password);
+        final data = await _storageRepository.importBackupFile(
+          filePath,
+          password: password,
+        );
         _services = data.services;
         _groups = data.groups;
         _setStorageModeAfterImport();

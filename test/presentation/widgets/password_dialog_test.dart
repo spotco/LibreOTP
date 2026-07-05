@@ -10,10 +10,7 @@ void main() {
         body: Builder(
           builder: (context) => ElevatedButton(
             onPressed: () {
-              showDialog<String>(
-                context: context,
-                builder: (_) => dialog,
-              );
+              showDialog<String>(context: context, builder: (_) => dialog);
             },
             child: const Text('Open'),
           ),
@@ -22,18 +19,16 @@ void main() {
     );
   }
 
-  Future<void> openDialog(
-    WidgetTester tester,
-    PasswordDialog dialog,
-  ) async {
+  Future<void> openDialog(WidgetTester tester, PasswordDialog dialog) async {
     await tester.pumpWidget(buildDialog(dialog));
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
   }
 
   group('PasswordDialog', () {
-    testWidgets('shows vault unlock copy and action label',
-        (WidgetTester tester) async {
+    testWidgets('shows vault unlock copy and action label', (
+      WidgetTester tester,
+    ) async {
       await openDialog(
         tester,
         const PasswordDialog(mode: PasswordDialogMode.unlockVault),
@@ -49,8 +44,45 @@ void main() {
       expect(find.text('Unlock'), findsOneWidget);
     });
 
-    testWidgets('shows backup decrypt copy and action label',
-        (WidgetTester tester) async {
+    testWidgets('preserves surrounding whitespace in the submitted password', (
+      WidgetTester tester,
+    ) async {
+      String? submitted;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () async {
+                  submitted = await showDialog<String>(
+                    context: context,
+                    builder: (_) => const PasswordDialog(
+                      mode: PasswordDialogMode.unlockVault,
+                    ),
+                  );
+                },
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byType(TextField).first,
+        '  spaced password  ',
+      );
+      await tester.tap(find.text('Unlock'));
+      await tester.pumpAndSettle();
+
+      expect(submitted, equals('  spaced password  '));
+    });
+
+    testWidgets('shows backup decrypt copy and action label', (
+      WidgetTester tester,
+    ) async {
       await openDialog(
         tester,
         const PasswordDialog(mode: PasswordDialogMode.decryptBackup),
@@ -66,8 +98,9 @@ void main() {
       expect(find.text('Decrypt'), findsOneWidget);
     });
 
-    testWidgets('shows confirmation field in create vault mode',
-        (WidgetTester tester) async {
+    testWidgets('shows confirmation field in create vault mode', (
+      WidgetTester tester,
+    ) async {
       await openDialog(
         tester,
         const PasswordDialog(mode: PasswordDialogMode.createVaultPassword),
@@ -79,8 +112,9 @@ void main() {
       expect(find.text('Create Vault'), findsOneWidget);
     });
 
-    testWidgets('shows mismatch error in create vault mode',
-        (WidgetTester tester) async {
+    testWidgets('shows mismatch error in create vault mode', (
+      WidgetTester tester,
+    ) async {
       await openDialog(
         tester,
         const PasswordDialog(mode: PasswordDialogMode.createVaultPassword),
@@ -103,8 +137,9 @@ void main() {
       );
     });
 
-    testWidgets('returns password when vault creation confirmation matches',
-        (WidgetTester tester) async {
+    testWidgets('returns password when vault creation confirmation matches', (
+      WidgetTester tester,
+    ) async {
       String? result;
 
       await tester.pumpWidget(
@@ -143,8 +178,9 @@ void main() {
       expect(result, equals('matching-password'));
     });
 
-    testWidgets('shows change vault password copy and confirm field',
-        (WidgetTester tester) async {
+    testWidgets('shows change vault password copy and confirm field', (
+      WidgetTester tester,
+    ) async {
       await openDialog(
         tester,
         const PasswordDialog(mode: PasswordDialogMode.changeVaultPassword),
@@ -160,8 +196,9 @@ void main() {
       );
     });
 
-    testWidgets('renders corrupted vault error copy',
-        (WidgetTester tester) async {
+    testWidgets('renders corrupted vault error copy', (
+      WidgetTester tester,
+    ) async {
       await openDialog(
         tester,
         const PasswordDialog(
@@ -178,8 +215,9 @@ void main() {
       );
     });
 
-    testWidgets('renders incorrect password error copy',
-        (WidgetTester tester) async {
+    testWidgets('renders incorrect password error copy', (
+      WidgetTester tester,
+    ) async {
       await openDialog(
         tester,
         const PasswordDialog(
