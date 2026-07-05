@@ -17,6 +17,7 @@ class EditServiceDialog extends StatefulWidget {
 class _EditServiceDialogState extends State<EditServiceDialog> {
   late final TextEditingController _nameController;
   late final TextEditingController _accountController;
+  String? _nameError;
 
   @override
   void initState() {
@@ -43,11 +44,19 @@ class _EditServiceDialogState extends State<EditServiceDialog> {
           children: [
             TextField(
               controller: _nameController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Name',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                errorText: _nameError,
               ),
               textInputAction: TextInputAction.next,
+              onChanged: (_) {
+                if (_nameError != null) {
+                  setState(() {
+                    _nameError = null;
+                  });
+                }
+              },
             ),
             const SizedBox(height: 12),
             TextField(
@@ -76,10 +85,17 @@ class _EditServiceDialogState extends State<EditServiceDialog> {
   }
 
   void _submit() {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      setState(() {
+        _nameError = 'Name cannot be empty.';
+      });
+      return;
+    }
     Navigator.of(context).pop(
       EditServiceResult(
-        name: _nameController.text,
-        account: _accountController.text,
+        name: name,
+        account: _accountController.text.trim(),
       ),
     );
   }

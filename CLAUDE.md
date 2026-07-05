@@ -29,7 +29,7 @@ The app follows a layered architecture with Provider for state management:
 - **`lib/presentation/state/otp_state.dart`** - Central `ChangeNotifier`. Manages services list, groups, search, display modes (grouped vs usage-based), OTP generation with countdown timers, and debounced persistence. This is the core business logic orchestrator.
 - **`lib/presentation/state/otp_display_state.dart`** - Immutable state for a single OTP display (code + validity countdown).
 - **`lib/presentation/pages/`** - `DashboardPage` (main view), `AboutPage`, `DataDirectoryPage`.
-- **`lib/presentation/widgets/`** - UI components: `OtpTable`, `ServiceRow`, `GroupHeader`, `SearchBar`, `PasswordDialog`, `NotificationToast`.
+- **`lib/presentation/widgets/`** - UI components: `OtpTable` (sortable columns), `ServiceRow` (right-click context menu with entry editing), `GroupHeader`, `EditServiceDialog`, `SearchBar`, `PasswordDialog`, `NotificationToast`.
 - **`lib/utils/`** - Clipboard and JSON utilities.
 
 ### Key data flow

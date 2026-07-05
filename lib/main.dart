@@ -200,9 +200,19 @@ class _LibreOTPAppState extends State<LibreOTPApp> with WindowListener {
     }
     _isClosing = true;
     _saveTimer?.cancel();
-    await _saveWindowStateOnClose();
-    await windowManager.setPreventClose(false);
-    await windowManager.close();
+    try {
+      await _saveWindowStateOnClose();
+    } catch (e) {
+      debugPrint('Could not persist window state on close: $e');
+    }
+    try {
+      await windowManager.setPreventClose(false);
+      await windowManager.close();
+    } catch (e) {
+      // Let the user retry closing instead of latching the window open.
+      _isClosing = false;
+      debugPrint('Window close failed: $e');
+    }
   }
 
   @override
