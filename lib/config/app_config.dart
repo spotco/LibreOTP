@@ -126,6 +126,27 @@ class AppConfig {
     await prefs.setDouble(_windowHeightKey, bounds.height);
   }
 
+  static Future<void> persistWindowState({
+    required bool maximized,
+    Rect? bounds,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final writes = <Future<bool>>[
+      prefs.setBool(_windowMaximizedKey, maximized),
+    ];
+
+    if (bounds != null) {
+      writes.addAll([
+        prefs.setDouble(_windowXKey, bounds.left),
+        prefs.setDouble(_windowYKey, bounds.top),
+        prefs.setDouble(_windowWidthKey, bounds.width),
+        prefs.setDouble(_windowHeightKey, bounds.height),
+      ]);
+    }
+
+    await Future.wait(writes);
+  }
+
   static Future<bool> getWindowMaximized() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(_windowMaximizedKey) ?? false;
